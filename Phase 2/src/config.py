@@ -6,6 +6,15 @@ from dataclasses import dataclass, field
 
 BASELINE_GNB_COUNT = 1
 
+# Phase 4 additions (opt-in; the baseline defaults below are unchanged)
+EXTENDED_ACIR_MIN_DB = 12.0
+EXTENDED_ACIR_MAX_DB = 45.0
+EXTENDED_ACIR_STEP_DB = 3.0
+EXTENDED_ACIR_POINTS_DB = tuple(
+    float(value) for value in range(int(EXTENDED_ACIR_MIN_DB), int(EXTENDED_ACIR_MAX_DB) + 1, int(EXTENDED_ACIR_STEP_DB))
+)
+DEFAULT_ANTENNA_COUNTS = (16, 32, 64)
+
 
 @dataclass(frozen=True)
 class ReproducibilityConfig:
@@ -35,6 +44,11 @@ class ACIRSweepConfig:
             raise ValueError("ACIR sweep points must remain within configured bounds.")
         if any(next_point <= point for point, next_point in zip(self.points_db, self.points_db[1:])):
             raise ValueError("ACIR sweep points must be strictly increasing.")
+
+    @classmethod
+    def extended(cls) -> "ACIRSweepConfig":
+        """Phase 4 grid: 12-45 dB every 3 dB (12 points). Opt-in; the default sweep stays 20-40 dB."""
+        return cls(min_db=EXTENDED_ACIR_MIN_DB, max_db=EXTENDED_ACIR_MAX_DB, points_db=EXTENDED_ACIR_POINTS_DB)
 
 
 @dataclass(frozen=True)
@@ -123,6 +137,27 @@ class UserConfig:
 
 
 @dataclass(frozen=True)
+class AntennaConfig:
+    """Gateway/gNB array sizes swept in Phase 4 (ULA elements)."""
+
+    counts: tuple[int, ...] = DEFAULT_ANTENNA_COUNTS
+    default_count: int = 64
+
+    def __post_init__(self) -> None:
+        if not self.counts:
+            raise ValueError("counts cannot be empty.")
+        for count in self.counts:
+            if isinstance(count, bool) or not isinstance(count, int):
+                raise ValueError("antenna counts must be integers.")
+            if count <= 1:
+                raise ValueError("antenna counts must be > 1.")
+        if any(next_count <= count for count, next_count in zip(self.counts, self.counts[1:])):
+            raise ValueError("antenna counts must be strictly increasing.")
+        if self.default_count not in self.counts:
+            raise ValueError("default_count must be one of counts.")
+
+
+@dataclass(frozen=True)
 class ScenarioPreset:
     """Single scenario profile."""
 
@@ -207,6 +242,7 @@ class SimulationConfig:
     users: UserConfig = field(default_factory=UserConfig)
     scenario: ScenarioConfig = field(default_factory=ScenarioConfig)
     experiment: ExperimentConfig = field(default_factory=ExperimentConfig)
+    antenna: AntennaConfig = field(default_factory=AntennaConfig)
 
     def __post_init__(self) -> None:
         self.validate()
@@ -224,6 +260,40 @@ class SimulationConfig:
                 f"user_count must be within [{self.users.min_count}, {self.users.max_count}]."
             )
         return user_count
+
+    def resolve_antenna_count(self, requested_count: int | None = None) -> int:
+        """Resolve an antenna count, which must be one of the configured counts."""
+        count = self.antenna.default_count if requested_count is None else requested_count
+        if count not in self.antenna.counts:
+            raise ValueError(f"antenna count must be one of {self.antenna.counts}.")
+        return count
+
+    @classmethod
+    def extended(
+        cls,
+        *,
+        gnb_count: int = 3,
+        max_users: int = 20,
+        user_count_sweep: tuple[int, ...] = (4, 8, 12, 16),
+    ) -> "SimulationConfig":
+        """EXPLICIT opt-in extended preset for Phase 4.
+
+        Relaxes the baseline's 1-gNB and 4-5-user limits (``enforce_baseline_realism=False``) and uses the
+        12-45 dB ACIR grid and antenna counts 16/32/64. ``SimulationConfig()`` (the baseline) is unchanged.
+        """
+        if gnb_count < 1:
+            raise ValueError("gnb_count must be >= 1.")
+        if max_users < 1:
+            raise ValueError("max_users must be >= 1.")
+        config = cls(
+            radio=RadioConfig(acir_sweep=ACIRSweepConfig.extended()),
+            tn_deployment=TNDeploymentConfig(gnb_count=gnb_count),
+            users=UserConfig(min_count=1, max_count=max_users, default_count=min(5, max_users)),
+            experiment=ExperimentConfig(enforce_baseline_realism=False, user_count_sweep=user_count_sweep),
+        )
+        for user_count in user_count_sweep:
+            config.resolve_user_count(user_count)  # raises if the sweep leaves [1, max_users]
+        return config
 
     def get_active_scenario(self) -> ScenarioPreset:
         """Return the active scenario preset."""
