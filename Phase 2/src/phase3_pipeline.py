@@ -26,7 +26,8 @@ class Phase3Gates:
     """Quality thresholds used to move between Phase 3 stages."""
 
     lstm_target_accuracy: float = 0.80  # legacy within-10% metric: reported, NOT gated on
-    lstm_min_skill_vs_persistence: float = 0.15  # the actual gate: MAE at least 15% below persistence
+    lstm_min_skill_vs_persistence: float = 0.15  # prototype gate: MAE at least 15% below persistence
+    lstm_min_final_skill: float = 0.05  # final gate vs best baseline; reported, never blocks mitigation
     zf_required_suppression_db: float = 15.0
 
     def __post_init__(self) -> None:
@@ -34,6 +35,8 @@ class Phase3Gates:
             raise ValueError("lstm_target_accuracy must be in (0, 1].")
         if not (0.0 <= self.lstm_min_skill_vs_persistence < 1.0):
             raise ValueError("lstm_min_skill_vs_persistence must be in [0, 1).")
+        if not (0.0 <= self.lstm_min_final_skill < 1.0):
+            raise ValueError("lstm_min_final_skill must be in [0, 1).")
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +83,7 @@ def run_prediction_track(
         transformer_config=transformer_config,
         target_accuracy=active_gates.lstm_target_accuracy,
         min_skill=active_gates.lstm_min_skill_vs_persistence,
+        min_final_skill=active_gates.lstm_min_final_skill,
         run_transformer_if_eligible=True,
         checkpoint_dir=checkpoint_dir,
     )
@@ -206,8 +210,16 @@ def _db_metrics_payload(model: Any) -> dict[str, Any] | None:
         "within_3db": metrics.within_3db,
         "persistence_mae_db": metrics.persistence_mae_db,
         "persistence_rmse_db": metrics.persistence_rmse_db,
+        "moving_average_mae_db": metrics.moving_average_mae_db,
+        "ar_mae_db": metrics.ar_mae_db,
+        "best_baseline": metrics.best_baseline,
+        "best_baseline_mae_db": metrics.best_baseline_mae_db,
         "skill_vs_persistence": metrics.skill_vs_persistence,
+        "skill_vs_best_baseline": metrics.skill_vs_best_baseline,
         "min_skill_required": model.min_skill,
+        "min_final_skill_required": model.min_final_skill,
+        "meets_prototype_target": model.meets_target,
+        "meets_final_target": model.meets_final_target,
     }
 
 
@@ -224,6 +236,7 @@ def to_serializable_summary(result: Phase3RunResult) -> dict[str, Any]:
                 "test_rmse": result.prediction.lstm.test_metrics.rmse,
                 "target_accuracy": result.prediction.lstm.target_accuracy,
                 "meets_target": result.prediction.lstm.meets_target,
+                "meets_final_target": result.prediction.lstm.meets_final_target,
                 "test_db_metrics": _db_metrics_payload(result.prediction.lstm),
                 "checkpoint_path": result.prediction.lstm.checkpoint_path,
                 "last_test_prediction": result.prediction.lstm.last_test_prediction,
@@ -239,6 +252,7 @@ def to_serializable_summary(result: Phase3RunResult) -> dict[str, Any]:
                 "test_normalized_mae": transformer.test_metrics.normalized_mae,
                 "test_rmse": transformer.test_metrics.rmse,
                 "meets_target": transformer.meets_target,
+                "meets_final_target": transformer.meets_final_target,
                 "test_db_metrics": _db_metrics_payload(transformer),
                 "checkpoint_path": transformer.checkpoint_path,
                 "last_test_prediction": transformer.last_test_prediction,

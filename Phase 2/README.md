@@ -52,11 +52,19 @@ multiple gNBs, antenna patterns/gains, mitigation inside the simulation loop.
 * **Secondary target — instantaneous interference** (`interference_dbm`, faded). Reported alongside;
   it contains an irreducible fading component.
 * **Persistence baseline:** the last observed `interference_dbm` in the window (faded).
-* **Gate:** test MAE (dB) must be at least **15% below persistence MAE**
-  (`skill = 1 − MAE_model / MAE_persistence ≥ 0.15`; fixed in advance, see
-  `DEFAULT_MIN_SKILL_VS_PERSISTENCE`). Also reported: MAE/RMSE in dB and the share of predictions
-  within ±1 dB and ±3 dB. The old "within 10% relative error" figure is still printed but is
-  informational only (on dBm values it is met by persistence).
+* **Prototype gate (gates the mitigation stage):** test MAE (dB) must be at least **15% below
+  persistence MAE** (`skill = 1 − MAE_model / MAE_persistence ≥ 0.15`; fixed in advance, see
+  `DEFAULT_MIN_SKILL_VS_PERSISTENCE`, CLI `--min-skill`).
+* **Final gate `meets_final_target` (reported only, never blocks mitigation):** test MAE must be at
+  least **5% below the best of** persistence, a 10-slot linear-power moving average and a linear
+  AR(10) fitted on the train split (`DEFAULT_MIN_FINAL_SKILL = 0.05`, fixed before any training,
+  CLI `--min-final-skill`). On the faded inputs persistence is a weak reference, so the prototype
+  gate alone can be passed by a plain smoother; the final gate cannot.
+* Also reported: MAE/RMSE in dB, the share of predictions within ±1 dB and ±3 dB, every baseline's
+  MAE, both skills and both gate results, in the summary JSON and on the console, for whichever
+  target the dataset in `--data-root` uses (`metadata.json`: local-mean or instantaneous). The old
+  "within 10% relative error" figure is still printed but is informational only (on dBm values it is
+  met by persistence).
 
 ## Datasets
 

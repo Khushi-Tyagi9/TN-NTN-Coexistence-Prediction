@@ -10,11 +10,14 @@ import numpy as np
 
 from .phase3_data import EXPECTED_FEATURE_COUNT, EXPECTED_LOOKBACK_SLOTS, Phase3DatasetSplit
 from .phase3_metrics import (
+    DEFAULT_MIN_FINAL_SKILL,
     DEFAULT_MIN_SKILL_VS_PERSISTENCE,
     DbMetrics,
     PredictionMetrics,
     evaluate_db_metrics,
     evaluate_prediction_metrics,
+    fit_ar_baseline,
+    meets_final_target,
     meets_skill_gate,
 )
 
@@ -136,10 +139,14 @@ class PredictionModelResult:
     validation_db_metrics: DbMetrics | None = None
     test_db_metrics: DbMetrics | None = None
     min_skill: float = DEFAULT_MIN_SKILL_VS_PERSISTENCE
+    meets_final_target: bool = False  # does NOT gate mitigation; only meets_target does
+    min_final_skill: float = DEFAULT_MIN_FINAL_SKILL
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.min_skill < 1.0):
             raise ValueError("min_skill must be in [0, 1).")
+        if not (0.0 <= self.min_final_skill < 1.0):
+            raise ValueError("min_final_skill must be in [0, 1).")
         if not self.model_name.strip():
             raise ValueError("model_name cannot be empty.")
         if self.best_epoch <= 0:
@@ -390,6 +397,7 @@ def train_lstm_forecaster(
     config: LSTMTrainingConfig | None = None,
     target_accuracy: float = 0.80,
     min_skill: float = DEFAULT_MIN_SKILL_VS_PERSISTENCE,
+    min_final_skill: float = DEFAULT_MIN_FINAL_SKILL,
     checkpoint_path: str | Path | None = None,
 ) -> PredictionModelResult:
     """Train and evaluate the LSTM forecaster."""
@@ -419,8 +427,13 @@ def train_lstm_forecaster(
     test_predictions = normalization.inverse_targets(test_predictions_scaled)
     validation_metrics = evaluate_prediction_metrics(split.y_val, val_predictions)
     test_metrics = evaluate_prediction_metrics(split.y_test, test_predictions)
-    validation_db_metrics = evaluate_db_metrics(split.y_val, val_predictions, split.X_val)
-    test_db_metrics = evaluate_db_metrics(split.y_test, test_predictions, split.X_test)
+    ar_coefficients = fit_ar_baseline(split.X_train, split.y_train)  # baseline fitted on train only
+    validation_db_metrics = evaluate_db_metrics(
+        split.y_val, val_predictions, split.X_val, ar_coefficients=ar_coefficients
+    )
+    test_db_metrics = evaluate_db_metrics(
+        split.y_test, test_predictions, split.X_test, ar_coefficients=ar_coefficients
+    )
     last_test_prediction = float(test_predictions[-1])
     last_test_target = float(np.asarray(split.y_test, dtype=np.float32)[-1])
     test_target_min = float(np.min(split.y_test))
@@ -443,6 +456,8 @@ def train_lstm_forecaster(
         validation_db_metrics=validation_db_metrics,
         test_db_metrics=test_db_metrics,
         min_skill=min_skill,
+        meets_final_target=meets_final_target(test_db_metrics, min_final_skill=min_final_skill),
+        min_final_skill=min_final_skill,
         checkpoint_path=saved_checkpoint,
         last_test_prediction=last_test_prediction,
         last_test_target=last_test_target,
@@ -457,6 +472,7 @@ def train_transformer_forecaster(
     config: TransformerTrainingConfig | None = None,
     target_accuracy: float = 0.80,
     min_skill: float = DEFAULT_MIN_SKILL_VS_PERSISTENCE,
+    min_final_skill: float = DEFAULT_MIN_FINAL_SKILL,
     checkpoint_path: str | Path | None = None,
 ) -> PredictionModelResult:
     """Train and evaluate the Transformer forecaster."""
@@ -486,8 +502,13 @@ def train_transformer_forecaster(
     test_predictions = normalization.inverse_targets(test_predictions_scaled)
     validation_metrics = evaluate_prediction_metrics(split.y_val, val_predictions)
     test_metrics = evaluate_prediction_metrics(split.y_test, test_predictions)
-    validation_db_metrics = evaluate_db_metrics(split.y_val, val_predictions, split.X_val)
-    test_db_metrics = evaluate_db_metrics(split.y_test, test_predictions, split.X_test)
+    ar_coefficients = fit_ar_baseline(split.X_train, split.y_train)  # baseline fitted on train only
+    validation_db_metrics = evaluate_db_metrics(
+        split.y_val, val_predictions, split.X_val, ar_coefficients=ar_coefficients
+    )
+    test_db_metrics = evaluate_db_metrics(
+        split.y_test, test_predictions, split.X_test, ar_coefficients=ar_coefficients
+    )
     last_test_prediction = float(test_predictions[-1])
     last_test_target = float(np.asarray(split.y_test, dtype=np.float32)[-1])
     test_target_min = float(np.min(split.y_test))
@@ -510,6 +531,8 @@ def train_transformer_forecaster(
         validation_db_metrics=validation_db_metrics,
         test_db_metrics=test_db_metrics,
         min_skill=min_skill,
+        meets_final_target=meets_final_target(test_db_metrics, min_final_skill=min_final_skill),
+        min_final_skill=min_final_skill,
         checkpoint_path=saved_checkpoint,
         last_test_prediction=last_test_prediction,
         last_test_target=last_test_target,
@@ -525,6 +548,7 @@ def run_prediction_stage(
     transformer_config: TransformerTrainingConfig | None = None,
     target_accuracy: float = 0.80,
     min_skill: float = DEFAULT_MIN_SKILL_VS_PERSISTENCE,
+    min_final_skill: float = DEFAULT_MIN_FINAL_SKILL,
     run_transformer_if_eligible: bool = True,
     checkpoint_dir: str | Path | None = None,
 ) -> PredictionStageResult:
@@ -536,6 +560,7 @@ def run_prediction_stage(
         config=lstm_config,
         target_accuracy=target_accuracy,
         min_skill=min_skill,
+        min_final_skill=min_final_skill,
         checkpoint_path=lstm_checkpoint,
     )
 
@@ -549,6 +574,7 @@ def run_prediction_stage(
             config=transformer_config,
             target_accuracy=target_accuracy,
             min_skill=min_skill,
+            min_final_skill=min_final_skill,
             checkpoint_path=transformer_checkpoint,
         )
 

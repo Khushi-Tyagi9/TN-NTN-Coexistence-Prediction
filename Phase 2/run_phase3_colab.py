@@ -40,12 +40,26 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--antenna-count", type=int, default=64, help="Antenna count for ZF evaluation.")
     parser.add_argument(
+        "--min-final-skill",
+        type=float,
+        default=0.05,
+        help="Final gate (reported, never blocks mitigation): MAE this fraction below the best of persistence / 10-slot linear MA / linear AR(10).",
+    )
+    parser.add_argument(
         "--allow-window-shuffle",
         action="store_true",
         help="Allow a random per-window split of unsplit X.npy/y.npy when no groups.npy exists (LEAKY; avoid).",
     )
     parser.add_argument("--run-drl", action="store_true", help="Train PPO after ZF gate passes.")
     return parser
+
+
+def _read_dataset_metadata(data_root: Path) -> dict | None:
+    """metadata.json written by build_phase3_dataset.py (None for hand-made datasets)."""
+    path = data_root / "metadata.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def main() -> int:
@@ -55,6 +69,7 @@ def main() -> int:
     gates = Phase3Gates(
         lstm_target_accuracy=args.target_accuracy,
         lstm_min_skill_vs_persistence=args.min_skill,
+        lstm_min_final_skill=args.min_final_skill,
         zf_required_suppression_db=args.zf_required_db,
     )
     lstm_cfg = LSTMTrainingConfig(
@@ -93,17 +108,36 @@ def main() -> int:
         "LSTM test within-10%-error accuracy (legacy, informational): "
         f"{payload['prediction']['lstm']['test_within_10pct_accuracy']:.4f}"
     )
-    db = payload["prediction"]["lstm"]["test_db_metrics"]
-    if db is not None:
+    dataset_meta = _read_dataset_metadata(Path(args.data_root))
+    if dataset_meta is not None:
+        payload["dataset"] = {k: dataset_meta.get(k) for k in ("scenario", "target_kind", "target", "target_definition")}
+        print(f"Dataset target: {payload['dataset']['target_kind']} ({payload['dataset']['target']})")
+    for model_name in ("lstm", "transformer"):
+        model_payload = payload["prediction"][model_name]
+        db = None if model_payload is None else model_payload["test_db_metrics"]
+        if db is None:
+            continue
         print(
-            f"LSTM test MAE {db['mae_db']:.3f} dB | RMSE {db['rmse_db']:.3f} dB | "
+            f"[{model_name}] test MAE {db['mae_db']:.3f} dB | RMSE {db['rmse_db']:.3f} dB | "
             f"within 1 dB {db['within_1db']:.3f} | within 3 dB {db['within_3db']:.3f}"
         )
         print(
-            f"Persistence MAE {db['persistence_mae_db']:.3f} dB | "
-            f"skill vs persistence {db['skill_vs_persistence']:.3f} (required >= {db['min_skill_required']:.2f})"
+            f"[{model_name}] baselines MAE (dB): persistence {db['persistence_mae_db']:.3f} | "
+            f"10-slot linear MA {db['moving_average_mae_db']:.3f} | linear AR(10) {db['ar_mae_db']:.3f} "
+            f"(best: {db['best_baseline']})"
         )
-    print(f"LSTM gate passed: {payload['prediction']['lstm']['meets_target']}")
+        print(
+            f"[{model_name}] skill vs persistence {db['skill_vs_persistence']:+.3f} "
+            f"(need >= {db['min_skill_required']:.2f}) -> prototype gate: {db['meets_prototype_target']}"
+        )
+        print(
+            f"[{model_name}] skill vs best baseline {db['skill_vs_best_baseline']:+.3f} "
+            f"(need >= {db['min_final_skill_required']:.2f}) -> final gate: {db['meets_final_target']}"
+        )
+    lstm_payload = payload["prediction"]["lstm"]
+    print(f"LSTM prototype gate passed (gates mitigation): {lstm_payload['meets_target']}")
+    print(f"LSTM final gate passed (reported only): {lstm_payload['meets_final_target']}")
+    summary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(f"Transformer fallback executed: {payload['prediction']['transformer_executed']}")
     print(f"ZF suppression (dB): {payload['mitigation']['suppression_db']:.4f}")
     print(f"Mitigation predictor: {payload['mitigation']['predictor_used']}")
