@@ -39,6 +39,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="Max NTN angle offset inferred from predicted interference.",
     )
     parser.add_argument("--antenna-count", type=int, default=64, help="Antenna count for ZF evaluation.")
+    parser.add_argument(
+        "--allow-window-shuffle",
+        action="store_true",
+        help="Allow a random per-window split of unsplit X.npy/y.npy when no groups.npy exists (LEAKY; avoid).",
+    )
     parser.add_argument("--run-drl", action="store_true", help="Train PPO after ZF gate passes.")
     return parser
 
@@ -76,6 +81,7 @@ def main() -> int:
         lstm_config=lstm_cfg,
         transformer_config=transformer_cfg,
         checkpoint_dir=args.checkpoint_dir,
+        allow_window_shuffle=args.allow_window_shuffle,
         train_drl=args.run_drl,
     )
     payload = to_serializable_summary(result)

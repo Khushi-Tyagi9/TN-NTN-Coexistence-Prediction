@@ -67,10 +67,13 @@ def run_prediction_track(
     lstm_config: LSTMTrainingConfig | None = None,
     transformer_config: TransformerTrainingConfig | None = None,
     checkpoint_dir: str | Path | None = None,
+    allow_window_shuffle: bool = False,
 ) -> tuple[Phase3DatasetSplit, PredictionStageResult]:
     """Run Track A prediction in required order: LSTM first, Transformer as fallback."""
     active_gates = Phase3Gates() if gates is None else gates
-    dataset = load_phase3_dataset(data_root, scenario=scenario, seed=seed)
+    dataset = load_phase3_dataset(
+        data_root, scenario=scenario, seed=seed, allow_window_shuffle=allow_window_shuffle
+    )
     prediction_result = run_prediction_stage(
         dataset,
         lstm_config=lstm_config,
@@ -162,6 +165,7 @@ def run_phase3_pipeline(
     lstm_config: LSTMTrainingConfig | None = None,
     transformer_config: TransformerTrainingConfig | None = None,
     checkpoint_dir: str | Path | None = None,
+    allow_window_shuffle: bool = False,
     train_drl: bool = False,
     env_config: DrlEnvConfig | None = None,
     ppo_config: PPOTrainingConfig | None = None,
@@ -175,6 +179,7 @@ def run_phase3_pipeline(
         lstm_config=lstm_config,
         transformer_config=transformer_config,
         checkpoint_dir=checkpoint_dir,
+        allow_window_shuffle=allow_window_shuffle,
     )
     mitigation_result = run_mitigation_track(
         prediction_result=prediction_result,

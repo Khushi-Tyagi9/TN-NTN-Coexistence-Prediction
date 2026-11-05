@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -88,16 +89,68 @@ class Phase3DatasetSplit:
         return int(self.X_train.shape[0] + self.X_val.shape[0] + self.X_test.shape[0])
 
 
+def _group_split_counts(group_count: int, val_ratio: float, test_ratio: float) -> tuple[int, int, int]:
+    """(train, val, test) group counts; val/test use round() and are at least 1 each."""
+    if group_count < 3:
+        raise ValueError("At least 3 groups (runs) are required for train/val/test splitting.")
+    n_val = max(1, int(round(group_count * val_ratio)))
+    n_test = max(1, int(round(group_count * test_ratio)))
+    n_train = group_count - n_val - n_test
+    if n_train < 1:
+        raise ValueError("Split ratios produced an empty train split; provide more groups.")
+    return n_train, n_val, n_test
+
+
+def _shuffled_window_indices(
+    sample_count: int, train_ratio: float, val_ratio: float, seed: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    train_count = int(np.floor(sample_count * train_ratio))
+    val_count = int(np.floor(sample_count * val_ratio))
+    test_count = sample_count - train_count - val_count
+    if train_count <= 0 or val_count <= 0 or test_count <= 0:
+        raise ValueError("Split ratios produced an empty split; provide a larger dataset.")
+    shuffled = np.random.default_rng(seed).permutation(sample_count)
+    return shuffled[:train_count], shuffled[train_count : train_count + val_count], shuffled[train_count + val_count :]
+
+
+def _grouped_window_indices(
+    group_ids: np.ndarray, val_ratio: float, test_ratio: float, seed: int
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    unique_groups = np.unique(group_ids)  # sorted -> deterministic given seed
+    n_train, n_val, _ = _group_split_counts(unique_groups.shape[0], val_ratio, test_ratio)
+    order = np.random.default_rng(seed).permutation(unique_groups.shape[0])
+    shuffled_groups = unique_groups[order]
+    train_groups = shuffled_groups[:n_train]
+    val_groups = shuffled_groups[n_train : n_train + n_val]
+    test_groups = shuffled_groups[n_train + n_val :]
+    return (
+        np.flatnonzero(np.isin(group_ids, train_groups)),
+        np.flatnonzero(np.isin(group_ids, val_groups)),
+        np.flatnonzero(np.isin(group_ids, test_groups)),
+    )
+
+
 def split_phase3_dataset(
     features: np.ndarray,
     targets: np.ndarray,
     *,
+    group_ids: np.ndarray | None = None,
     train_ratio: float = DEFAULT_TRAIN_RATIO,
     val_ratio: float = DEFAULT_VAL_RATIO,
     test_ratio: float = DEFAULT_TEST_RATIO,
     seed: int = 42,
+    allow_window_shuffle: bool = False,
 ) -> Phase3DatasetSplit:
-    """Deterministically split a full Phase 3 dataset."""
+    """Deterministically split a full Phase 3 dataset WITHOUT leaking overlapping windows.
+
+    Windows are slid with stride 1, so window i+1 contains window i's target as an input.
+    Shuffling individual windows therefore puts test labels into the training inputs.
+    The split is done per *group* (``group_ids``: one id per window, e.g. the simulation run
+    and user it came from); every group lands entirely in one of train/val/test.
+
+    ``allow_window_shuffle=True`` restores the old per-window shuffle (leaky; emits a warning).
+    It exists only for data that is genuinely i.i.d. per row (e.g. unit-test fixtures).
+    """
     if seed < 0:
         raise ValueError("seed must be >= 0.")
     if train_ratio <= 0 or val_ratio <= 0 or test_ratio <= 0:
@@ -110,17 +163,25 @@ def split_phase3_dataset(
     if sample_count < 3:
         raise ValueError("At least 3 samples are required for train/val/test splitting.")
 
-    train_count = int(np.floor(sample_count * train_ratio))
-    val_count = int(np.floor(sample_count * val_ratio))
-    test_count = sample_count - train_count - val_count
-    if train_count <= 0 or val_count <= 0 or test_count <= 0:
-        raise ValueError("Split ratios produced an empty split; provide a larger dataset.")
-
-    rng = np.random.default_rng(seed)
-    shuffled_indices = rng.permutation(sample_count)
-    train_idx = shuffled_indices[:train_count]
-    val_idx = shuffled_indices[train_count : train_count + val_count]
-    test_idx = shuffled_indices[train_count + val_count :]
+    if group_ids is not None:
+        groups = np.asarray(group_ids)
+        if groups.ndim != 1 or groups.shape[0] != sample_count:
+            raise ValueError("group_ids must be a 1-D array with one id per window.")
+        train_idx, val_idx, test_idx = _grouped_window_indices(groups, val_ratio, test_ratio, seed)
+    elif allow_window_shuffle:
+        warnings.warn(
+            "Splitting overlapping time-series windows at random leaks test targets into training "
+            "inputs; pass group_ids (per-run ids) instead of allow_window_shuffle=True.",
+            UserWarning,
+            stacklevel=2,
+        )
+        train_idx, val_idx, test_idx = _shuffled_window_indices(sample_count, train_ratio, val_ratio, seed)
+    else:
+        raise ValueError(
+            "group_ids are required: windows overlap in time, so a random window split leaks test "
+            "targets into training. Provide per-window run ids (group_ids), or pass "
+            "allow_window_shuffle=True only for data whose rows are independent."
+        )
 
     return Phase3DatasetSplit(
         X_train=validated_features[train_idx],
@@ -130,6 +191,38 @@ def split_phase3_dataset(
         X_test=validated_features[test_idx],
         y_test=validated_targets[test_idx],
     )
+
+
+def window_overlap_fraction(
+    reference_windows: np.ndarray,
+    probe_windows: np.ndarray,
+    *,
+    min_shared_slots: int = 5,
+) -> float:
+    """Fraction of ``probe_windows`` that overlap in time with some ``reference_windows`` window.
+
+    Two stride-1 windows overlap when the last k slots of one equal the first k slots of the
+    other (k >= ``min_shared_slots``), checked in both directions. 0.0 means no leakage of this
+    kind between the two sets; use it on (train, test) to verify a split.
+    """
+    reference = _validate_feature_tensor(reference_windows, field_name="reference_windows")
+    probe = _validate_feature_tensor(probe_windows, field_name="probe_windows")
+    lookback = reference.shape[1]
+    if not (1 <= min_shared_slots < lookback):
+        raise ValueError("min_shared_slots must be in [1, lookback).")
+    if probe.shape[0] == 0:
+        return 0.0
+
+    hit = np.zeros(probe.shape[0], dtype=bool)
+    for shared in range(min_shared_slots, lookback):
+        ref_heads = {reference[i, :shared].tobytes() for i in range(reference.shape[0])}
+        ref_tails = {reference[i, lookback - shared :].tobytes() for i in range(reference.shape[0])}
+        for i in range(probe.shape[0]):
+            if hit[i]:
+                continue
+            if probe[i, lookback - shared :].tobytes() in ref_heads or probe[i, :shared].tobytes() in ref_tails:
+                hit[i] = True
+    return float(np.mean(hit))
 
 
 def _try_load_presplit(root: Path, *, scenario: str | None = None) -> Phase3DatasetSplit | None:
@@ -162,14 +255,27 @@ def _try_load_presplit(root: Path, *, scenario: str | None = None) -> Phase3Data
     return None
 
 
+def _first_existing(root: Path, names: list[str]) -> Path | None:
+    for name in names:
+        if (root / name).exists():
+            return root / name
+    return None
+
+
 def load_phase3_dataset(
     data_root: str | Path,
     *,
     scenario: str | None = None,
     seed: int = 42,
     require_pre_split: bool = False,
+    allow_window_shuffle: bool = False,
 ) -> Phase3DatasetSplit:
-    """Load Phase 3 dataset from pre-split files or from X/y arrays."""
+    """Load Phase 3 dataset from pre-split files or from X/y arrays.
+
+    Unsplit ``X.npy``/``y.npy`` are split per group using ``groups.npy`` (or
+    ``groups_<scenario>.npy``), one run id per window. Without group ids the load fails
+    unless ``allow_window_shuffle=True`` (leaky; see ``split_phase3_dataset``).
+    """
     root = Path(data_root)
     if not root.exists():
         raise FileNotFoundError(f"Dataset directory does not exist: {root}")
@@ -181,22 +287,33 @@ def load_phase3_dataset(
         raise FileNotFoundError("Pre-split files were required but not found under the supplied directory.")
 
     unsplit_name_candidates: list[tuple[str, str]] = []
+    group_name_candidates: list[str] = []
     if scenario:
         unsplit_name_candidates.append((f"X_{scenario}.npy", f"y_{scenario}.npy"))
+        group_name_candidates.append(f"groups_{scenario}.npy")
     unsplit_name_candidates.append(("X.npy", "y.npy"))
+    group_name_candidates.append("groups.npy")
 
     for x_name, y_name in unsplit_name_candidates:
         x_path = root / x_name
         y_path = root / y_name
         if x_path.exists() and y_path.exists():
-            return split_phase3_dataset(np.load(x_path), np.load(y_path), seed=seed)
+            groups_path = _first_existing(root, group_name_candidates)
+            group_ids = None if groups_path is None else np.load(groups_path)
+            return split_phase3_dataset(
+                np.load(x_path),
+                np.load(y_path),
+                group_ids=group_ids,
+                seed=seed,
+                allow_window_shuffle=allow_window_shuffle,
+            )
 
     supported = ", ".join(
         [
             "X_train.npy/y_train.npy + X_val.npy/y_val.npy + X_test.npy/y_test.npy",
             "X_<scenario>_<split>.npy + y_<scenario>_<split>.npy",
-            "X.npy + y.npy",
-            "X_<scenario>.npy + y_<scenario>.npy",
+            "X.npy + y.npy + groups.npy",
+            "X_<scenario>.npy + y_<scenario>.npy + groups_<scenario>.npy",
         ]
     )
     raise FileNotFoundError(f"No compatible Phase 3 dataset files found under {root}. Supported patterns: {supported}.")
