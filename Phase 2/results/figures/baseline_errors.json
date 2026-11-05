@@ -1,0 +1,41 @@
+{
+  "description": "Validation-split MAE (dB) of baselines for the next-slot local-mean target; no LSTM; test split not read.",
+  "figure_run": {
+    "run_id": "urban-u4-acir30-r0",
+    "user_count": 4,
+    "acir_db": 30.0,
+    "seed": 475401012,
+    "split": "val"
+  },
+  "baselines": {
+    "urban": {
+      "n_val_windows": 26550,
+      "val_mae_db": {
+        "persistence": 4.933144787718347,
+        "moving_average_10": 3.9057822076969773,
+        "linear_ar_10": 3.2270325781563436
+      }
+    },
+    "rural": {
+      "n_val_windows": 26550,
+      "val_mae_db": {
+        "persistence": 4.607382844109544,
+        "moving_average_10": 2.654383628629104,
+        "linear_ar_10": 2.471879437206179
+      }
+    }
+  },
+  "run_info": {
+    "seed": 0,
+    "python": "3.13.3",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "numpy": "2.5.2",
+    "torch": null,
+    "cuda_available": false,
+    "generated_utc": "2026-11-05T05:28:56+00:00",
+    "git_sha": "ced4544da0d93c3e156ce0753b247bf5709af8aa",
+    "git_dirty": true,
+    "scipy": "1.18.1",
+    "data_root": "data\\phase3"
+  }
+}

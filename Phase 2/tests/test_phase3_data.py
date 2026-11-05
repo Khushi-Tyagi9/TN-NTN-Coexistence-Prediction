@@ -220,3 +220,29 @@ def test_missing_split_file_is_not_silently_ignored(tmp_path) -> None:
 
     with pytest.raises(FileNotFoundError):
         load_phase3_dataset(tmp_path, scenario="urban")
+
+
+def test_load_train_val_arrays_never_opens_test_files(tmp_path) -> None:
+    from src.phase3_data import load_train_val_arrays
+
+    split = _tiny_split()
+    save_phase3_dataset_split(split, tmp_path)
+    (tmp_path / "X_test.npy").unlink()
+    (tmp_path / "y_test.npy").unlink()
+
+    x_train, y_train, x_val, y_val = load_train_val_arrays(tmp_path)
+
+    assert np.array_equal(x_train, split.X_train) and np.array_equal(y_val, split.y_val)
+    assert x_val.shape == split.X_val.shape and y_train.shape == split.y_train.shape
+
+
+def test_load_train_val_arrays_validates(tmp_path) -> None:
+    from src.phase3_data import load_train_val_arrays
+
+    with pytest.raises(FileNotFoundError):
+        load_train_val_arrays(tmp_path)
+    split = _tiny_split()
+    save_phase3_dataset_split(split, tmp_path)
+    np.save(tmp_path / "y_val.npy", split.y_val[:-1])
+    with pytest.raises(ValueError, match="same number of samples"):
+        load_train_val_arrays(tmp_path)

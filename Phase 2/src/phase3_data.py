@@ -371,3 +371,22 @@ def save_phase3_dataset_split(
     )
     for name, array in zip(names, arrays):
         np.save(root / name, array)
+
+
+def load_train_val_arrays(data_dir: str | Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Load ONLY ``X_train, y_train, X_val, y_val`` from a pre-split folder.
+
+    The test files are never opened, so exploratory work (preliminary runs, figures) cannot touch the
+    test split, which is reserved for the final protocol.
+    """
+    root = Path(data_dir)
+    names = ("X_train.npy", "y_train.npy", "X_val.npy", "y_val.npy")
+    x_train, y_train = _load_array(root / names[0]), _load_array(root / names[1])
+    x_val, y_val = _load_array(root / names[2]), _load_array(root / names[3])
+    x_train = _validate_feature_tensor(x_train, field_name="train.features")
+    x_val = _validate_feature_tensor(x_val, field_name="validation.features")
+    y_train = _validate_target_vector(y_train, field_name="train.targets")
+    y_val = _validate_target_vector(y_val, field_name="validation.targets")
+    if x_train.shape[0] != y_train.shape[0] or x_val.shape[0] != y_val.shape[0]:
+        raise ValueError("features and targets must have the same number of samples.")
+    return x_train, y_train, x_val, y_val

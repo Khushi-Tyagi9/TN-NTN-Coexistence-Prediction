@@ -81,6 +81,7 @@ def plot_actual_vs_predicted(
     snippet_slots: int = 200,
     max_scatter_points: int = 6000,
     seed: int = 0,
+    split_name: str = "test",
 ) -> Path:
     """Three panels: LSTM scatter vs truth, a contiguous test snippet, and the absolute-error CDF.
 
@@ -104,7 +105,7 @@ def plot_actual_vs_predicted(
     ax.plot([low, high], [low, high], color=INK, linewidth=1.2, label="ideal (y = x)")
     ax.set_xlabel("actual next-slot target (dBm)")
     ax.set_ylabel("LSTM prediction (dBm)")
-    ax.set_title("LSTM vs actual (random subset of test windows)", fontsize=10, loc="left")
+    ax.set_title(f"LSTM vs actual (random subset of {split_name} windows)", fontsize=10, loc="left")
     ax.legend(frameon=False, fontsize=9)
 
     ax = axes[1]
@@ -113,9 +114,9 @@ def plot_actual_vs_predicted(
     ax.plot(slots, truth[:count], color=INK, linewidth=2.0, label="actual")
     for key in ("persistence", "lstm"):
         ax.plot(slots, series[key][:count], color=colors[key], linewidth=1.5, label=labels[key])
-    ax.set_xlabel("consecutive test windows (one user, 0.5 s slots)")
+    ax.set_xlabel(f"consecutive {split_name} windows (one user, 0.5 s slots)")
     ax.set_ylabel("interference (dBm)")
-    ax.set_title(f"First {count} test windows", fontsize=10, loc="left")
+    ax.set_title(f"First {count} {split_name} windows", fontsize=10, loc="left")
     ax.legend(frameon=False, fontsize=9)
 
     ax = axes[2]
@@ -128,7 +129,7 @@ def plot_actual_vs_predicted(
     ax.set_xlim(0, 15)
     ax.set_ylim(0, 1)
     ax.set_xlabel("absolute error (dB)")
-    ax.set_ylabel("share of test windows with error <= x")
+    ax.set_ylabel(f"share of {split_name} windows with error <= x")
     ax.set_title("Absolute-error CDF", fontsize=10, loc="left")
     ax.legend(frameon=False, fontsize=9, loc="lower right")
 
