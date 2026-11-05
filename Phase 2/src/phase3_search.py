@@ -1,18 +1,19 @@
 """Validation-only hyperparameter search for the LSTM (Stage B).
 
-Declared before any training:
+Protocol as amended BEFORE any trial result existed (time limit; see docs/STAGE_B_PROTOCOL.md):
 
-* Grid: hidden size {64, 96, 128} x learning rate {1e-3, 3e-4} x layers {1, 2} = 12 configs. Nothing else
-  varies (batch 64, no dropout/weight decay, grad-clip 1.0, up to 120 epochs, patience 12).
-* Selection criterion: validation MAE in dB (lowest wins). Ties: smaller hidden size, fewer layers,
-  larger learning rate.
-* Search seed 42 only. The functions here accept train/validation arrays only, so the test split cannot
+* Training budget for every run: at most 40 epochs, early-stopping patience 6 on validation loss, batch 64,
+  no dropout/weight decay, gradient clip 1.0.
+* Reduced grid, searched on URBAN only with seed 42: the repo default (hidden 96, lr 1e-3) plus hidden
+  {64, 128} x lr {1e-3, 3e-4}, all 1 layer = 5 trials. The chosen config is reused unchanged for rural.
+  (The originally declared 12-config grid with 120 epochs / patience 12 was dropped for time.)
+* Selection criterion: lowest validation loss (normalised MSE); ties: smaller hidden size, fewer layers,
+  larger learning rate. The functions here accept train/validation arrays only, so the test split cannot
   influence selection. After the search the grid is closed.
 """
 
 from __future__ import annotations
 
-import itertools
 import time
 from dataclasses import asdict
 from typing import Any, Callable
@@ -31,21 +32,37 @@ from .phase3_prediction import (
 )
 from .reproducibility import seed_everything
 
-GRID_HIDDEN_SIZES = (64, 96, 128)
-GRID_LEARNING_RATES = (1e-3, 3e-4)
-GRID_NUM_LAYERS = (1, 2)
-SEARCH_SELECTION_CRITERION = "validation MAE (dB), lowest wins; ties: smaller hidden, fewer layers, larger learning rate"
+DEFAULT_MAX_EPOCHS = 40
+DEFAULT_EARLY_STOPPING_PATIENCE = 6
+SEARCH_SCENARIO = "urban"
+# (hidden size, learning rate, layers); the first entry is the repo default
+SEARCH_GRID: tuple[tuple[int, float, int], ...] = (
+    (96, 1e-3, 1),
+    (64, 1e-3, 1),
+    (64, 3e-4, 1),
+    (128, 1e-3, 1),
+    (128, 3e-4, 1),
+)
+SEARCH_SELECTION_CRITERION = (
+    "validation loss (normalised MSE), lowest wins; ties: smaller hidden size, fewer layers, larger learning rate"
+)
+ORIGINAL_GRID_NOT_RUN = "hidden {64,96,128} x lr {1e-3,3e-4} x layers {1,2} = 12 configs, 120 epochs, patience 12"
+REDUCTION_NOTE = (
+    "The hyperparameter search was reduced because of a time limit: 5 configs on urban only (seed 42) with a "
+    "40-epoch / patience-6 budget instead of the originally declared 12-config grid (120 epochs / patience 12). "
+    "The urban-selected config is reused unchanged for rural; there was no separate rural search."
+)
 
 
 def grid_configs(
     *,
     seed: int = 42,
-    max_epochs: int = 120,
-    early_stopping_patience: int = 12,
+    max_epochs: int = DEFAULT_MAX_EPOCHS,
+    early_stopping_patience: int = DEFAULT_EARLY_STOPPING_PATIENCE,
     batch_size: int = 64,
     device: str = "cpu",
 ) -> list[LSTMTrainingConfig]:
-    """The 12 configurations of the declared grid, in a fixed order."""
+    """The 5 configurations of the amended grid, in a fixed order (repo default first)."""
     return [
         LSTMTrainingConfig(
             hidden_size=hidden,
@@ -57,17 +74,17 @@ def grid_configs(
             device=device,
             seed=seed,
         )
-        for hidden, learning_rate, layers in itertools.product(GRID_HIDDEN_SIZES, GRID_LEARNING_RATES, GRID_NUM_LAYERS)
+        for hidden, learning_rate, layers in SEARCH_GRID
     ]
 
 
 def selection_key(trial: dict[str, Any]) -> tuple[float, int, int, float]:
     config = trial["config"]
-    return (trial["val_mae_db"], config["hidden_size"], config["num_layers"], -config["learning_rate"])
+    return (trial["best_val_loss_normalized_mse"], config["hidden_size"], config["num_layers"], -config["learning_rate"])
 
 
 def select_best(trials: list[dict[str, Any]]) -> int:
-    """Index of the winning trial by validation MAE with the documented tie-breaks."""
+    """Index of the winning trial by validation loss with the documented tie-breaks."""
     if not trials:
         raise ValueError("No trials to select from.")
     return min(range(len(trials)), key=lambda i: selection_key(trials[i]))

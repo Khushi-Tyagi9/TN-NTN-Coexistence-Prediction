@@ -10,9 +10,10 @@ import run_stage_b
 from src.phase3_aggregate import aggregate_seed_runs
 from src.phase3_metrics import DbMetrics
 from src.phase3_search import (
-    GRID_HIDDEN_SIZES,
-    GRID_LEARNING_RATES,
-    GRID_NUM_LAYERS,
+    DEFAULT_EARLY_STOPPING_PATIENCE,
+    DEFAULT_MAX_EPOCHS,
+    SEARCH_GRID,
+    SEARCH_SCENARIO,
     grid_configs,
     run_trial,
     run_validation_search,
@@ -32,29 +33,34 @@ def _metrics(mae: float, *, persistence: float = 5.0, moving_average: float = 4.
 
 
 # ---------------------------------------------------------------------------- grid + selection
-def test_grid_is_the_declared_twelve_configs_with_one_seed() -> None:
+def test_amended_grid_is_five_one_layer_configs_with_the_fixed_budget() -> None:
     configs = grid_configs()
 
-    assert len(configs) == 12 == len(GRID_HIDDEN_SIZES) * len(GRID_LEARNING_RATES) * len(GRID_NUM_LAYERS)
-    assert {(c.hidden_size, c.learning_rate, c.num_layers) for c in configs} == {
-        (h, lr, n) for h in (64, 96, 128) for lr in (1e-3, 3e-4) for n in (1, 2)
-    }
+    assert len(configs) == 5 == len(SEARCH_GRID) and SEARCH_SCENARIO == "urban"
+    assert [(c.hidden_size, c.learning_rate, c.num_layers) for c in configs] == [
+        (96, 1e-3, 1),  # repo default first
+        (64, 1e-3, 1), (64, 3e-4, 1), (128, 1e-3, 1), (128, 3e-4, 1),
+    ]
     assert {c.seed for c in configs} == {42}
     assert {(c.batch_size, c.max_epochs, c.early_stopping_patience, c.dropout, c.weight_decay) for c in configs} == {
-        (64, 120, 12, 0.0, 0.0)
+        (64, 40, 6, 0.0, 0.0)
     }
+    assert (DEFAULT_MAX_EPOCHS, DEFAULT_EARLY_STOPPING_PATIENCE) == (40, 6)
 
 
-def _trial(val_mae: float, hidden: int = 96, layers: int = 1, lr: float = 1e-3) -> dict:
-    return {"val_mae_db": val_mae, "config": {"hidden_size": hidden, "num_layers": layers, "learning_rate": lr}}
+def _trial(val_loss: float, hidden: int = 96, layers: int = 1, lr: float = 1e-3, val_mae: float = 9.9) -> dict:
+    return {"best_val_loss_normalized_mse": val_loss, "val_mae_db": val_mae,
+            "config": {"hidden_size": hidden, "num_layers": layers, "learning_rate": lr}}
 
 
-def test_selection_is_lowest_validation_mae_with_documented_tie_breaks() -> None:
-    assert select_best([_trial(3.0), _trial(2.5), _trial(2.7)]) == 1
+def test_selection_is_lowest_validation_loss_with_documented_tie_breaks() -> None:
+    assert select_best([_trial(0.30), _trial(0.25), _trial(0.27)]) == 1
+    # validation LOSS decides, not validation MAE
+    assert select_best([_trial(0.30, val_mae=1.0), _trial(0.20, val_mae=5.0)]) == 1
     # exact ties: smaller hidden size first, then fewer layers, then larger learning rate
-    assert select_best([_trial(2.0, hidden=128), _trial(2.0, hidden=64)]) == 1
-    assert select_best([_trial(2.0, layers=2), _trial(2.0, layers=1)]) == 1
-    assert select_best([_trial(2.0, lr=3e-4), _trial(2.0, lr=1e-3)]) == 1
+    assert select_best([_trial(0.2, hidden=128), _trial(0.2, hidden=64)]) == 1
+    assert select_best([_trial(0.2, layers=2), _trial(0.2, layers=1)]) == 1
+    assert select_best([_trial(0.2, lr=3e-4), _trial(0.2, lr=1e-3)]) == 1
     with pytest.raises(ValueError):
         select_best([])
 
@@ -154,72 +160,27 @@ def test_driver_parser_and_variant_rules() -> None:
     parser = run_stage_b.build_parser()
     args = parser.parse_args(["supplementary", "--scenario", "rural", "--variant", "nosinr"])
     assert (args.phase, args.scenario, args.variant, args.threads) == ("supplementary", "rural", "nosinr", 8)
+    assert (args.resume, args.accept_eta, args.eta_limit_hours) == (False, False, 2.0)
     with pytest.raises(SystemExit):
         parser.parse_args(["search", "--scenario", "suburban"])
     with pytest.raises(SystemExit, match="only valid"):
         run_stage_b.main(["search", "--scenario", "urban", "--variant", "nosinr"])
     assert run_stage_b.FINAL_SEEDS == (42, 43, 44) and run_stage_b.PRIMARY_SEED == 42
+    assert run_stage_b.FOLLOW_UP_RUNS == 6  # final trainings: 3 seeds x 2 scenarios
 
 
-# ---------------------------------------------------------------- real search -> final -> supplementary
-@pytest.fixture()
-def tiny_data_root(tmp_path):
-    from src.config import SimulationConfig
-    from src.phase3_dataset_builder import DatasetBuildConfig, build_phase3_dataset, save_dataset
-    from src.timeseries import TimeSeriesConfig
-
-    root = tmp_path / "data"
-    for target, folder in (("local_mean", "urban"), ("instantaneous", "urban_instantaneous")):
-        split, metadata = build_phase3_dataset(
-            SimulationConfig(), TimeSeriesConfig(n_slots=60),
-            DatasetBuildConfig(scenario="urban", user_counts=(4,), acir_points_db=(20.0, 30.0), runs_per_point=3,
-                               target=target),
-        )
-        save_dataset(split, metadata, root / folder)
-    return root
+def test_search_is_urban_only() -> None:
+    with pytest.raises(SystemExit, match="urban only"):
+        run_stage_b.main(["search", "--scenario", "rural"])
 
 
-def test_search_final_supplementary_end_to_end(tiny_data_root, tmp_path, monkeypatch) -> None:
-    pytest.importorskip("torch", reason="PyTorch not installed: Stage B driver is NOT exercised")
-    from src.phase3_prediction import LSTMTrainingConfig
+def test_amendment_record_states_the_time_limit_reduction() -> None:
+    amendment = run_stage_b._amendment()
 
-    monkeypatch.setattr(
-        run_stage_b, "grid_configs",
-        lambda **kw: [LSTMTrainingConfig(hidden_size=h, max_epochs=2, device="cpu", seed=kw["seed"]) for h in (64, 96)],
-    )
-    results = tmp_path / "results"
-    common = ["--scenario", "urban", "--data-root", str(tiny_data_root), "--results-root", str(results), "--threads", "2"]
-
-    assert run_stage_b.main(["search", *common]) == 0
-    trials = json.loads((results / "urban" / "search" / "trials.json").read_text(encoding="utf-8"))
-    assert trials["n_trials"] == 2 and trials["search_seed"] == 42
-    assert (results / "urban" / "search" / "trials.jsonl").read_text().count("\n") == 2
-    assert all(not any("test" in key for key in trial) for trial in trials["trials"])  # no test info in the log
-    assert trials["selected_config"] == trials["trials"][trials["selected_index"]]["config"]
-
-    assert run_stage_b.main(["final", *common]) == 0
-    summary = json.loads((results / "urban" / "summary.json").read_text(encoding="utf-8"))
-    aggregate = summary["aggregate"]
-    assert [row["seed"] for row in aggregate["per_seed"]] == [42, 43, 44]
-    assert aggregate["gate_basis"] == "mean test MAE over seeds [42, 43, 44]"
-    assert summary["dataset"]["sha256"]["X_test.npy"] and summary["run_info"]["torch_threads"] == 2
-    for seed in (42, 43, 44):
-        seed_dir = results / "urban" / "final" / f"seed_{seed}"
-        seed_summary = json.loads((seed_dir / "summary.json").read_text(encoding="utf-8"))
-        assert seed_summary["config"]["seed"] == seed and seed_summary["history"]["val_loss"]
-        assert (seed_dir / "lstm_best.pt").exists() and (seed_dir / "predictions_test.npz").exists()
-    assert (results / "urban" / "training_curves.png").exists() and (results / "urban" / "actual_vs_predicted.png").exists()
-
-    with pytest.raises(SystemExit, match="Refusing to overwrite"):  # grid is closed
-        run_stage_b.main(["final", *common])
-
-    assert run_stage_b.main(["supplementary", "--variant", "instantaneous", *common]) == 0
-    sup = json.loads(
-        (results / "urban" / "supplementary" / "instantaneous" / "summary_aggregate.json").read_text(encoding="utf-8")
-    )
-    assert sup["aggregate"]["n_seeds"] == 1 and "single seed 42" in sup["aggregate"]["gate_basis"]
-    with pytest.raises(SystemExit, match="not found"):  # no nosinr dataset was generated in this fixture
-        run_stage_b.main(["supplementary", "--variant", "nosinr", *common])
+    assert amendment["search_reduced_due_to_time_limit"] is True
+    assert "time limit" in amendment["note"] and "urban" in amendment["note"]
+    assert amendment["training_budget"] == {"max_epochs": 40, "early_stopping_patience": 6, "batch_size": 64}
+    assert len(amendment["grid"]) == 5 and "12 configs" in amendment["original_grid_not_run"]
 
 
 def test_dataset_kind_guard_rejects_a_mismatched_dataset() -> None:
@@ -231,8 +192,140 @@ def test_dataset_kind_guard_rejects_a_mismatched_dataset() -> None:
         run_stage_b._check_dataset_kind(info, target_kind="instantaneous", masked=["sinr_db"])
 
 
-def test_final_requires_a_search_first(tiny_data_root, tmp_path) -> None:
+# ------------------------------------------------------------ real search -> final -> supplementary
+@pytest.fixture()
+def tiny_data_root(tmp_path):
+    from src.config import SimulationConfig
+    from src.phase3_dataset_builder import DatasetBuildConfig, build_phase3_dataset, save_dataset
+    from src.timeseries import TimeSeriesConfig
+
+    root = tmp_path / "data"
+    for scenario, target, folder in (
+        ("urban", "local_mean", "urban"),
+        ("urban", "instantaneous", "urban_instantaneous"),
+        ("rural", "local_mean", "rural"),
+    ):
+        split, metadata = build_phase3_dataset(
+            SimulationConfig(), TimeSeriesConfig(n_slots=60),
+            DatasetBuildConfig(scenario=scenario, user_counts=(4,), acir_points_db=(20.0, 30.0), runs_per_point=3,
+                               target=target),
+        )
+        save_dataset(split, metadata, root / folder)
+    return root
+
+
+@pytest.fixture()
+def tiny_grid(monkeypatch):
+    """Two tiny configs instead of the real 5, so the driver can be run end to end in seconds."""
+    from src.phase3_prediction import LSTMTrainingConfig
+
+    monkeypatch.setattr(
+        run_stage_b, "grid_configs",
+        lambda **kw: [LSTMTrainingConfig(hidden_size=h, max_epochs=2, device="cpu", seed=kw["seed"]) for h in (64, 96)],
+    )
+
+
+def _common(tiny_data_root, results, scenario: str) -> list[str]:
+    return ["--scenario", scenario, "--data-root", str(tiny_data_root), "--results-root", str(results), "--threads", "2"]
+
+
+def test_search_final_supplementary_end_to_end(tiny_data_root, tmp_path, tiny_grid) -> None:
+    pytest.importorskip("torch", reason="PyTorch not installed: Stage B driver is NOT exercised")
+    results = tmp_path / "results"
+    urban, rural = _common(tiny_data_root, results, "urban"), _common(tiny_data_root, results, "rural")
+
+    assert run_stage_b.main(["search", *urban]) == 0
+    trials = json.loads((results / "urban" / "search" / "trials.json").read_text(encoding="utf-8"))
+    assert trials["n_trials"] == 2 and trials["search_seed"] == 42
+    assert trials["selection_criterion"].startswith("validation loss")
+    assert trials["protocol_amendment"]["search_reduced_due_to_time_limit"] is True
+    assert (results / "urban" / "search" / "trials.jsonl").read_text().count("\n") == 2
+    assert all(not any("test" in key for key in trial) for trial in trials["trials"])  # no test info in the log
+    winner = min(trials["trials"], key=lambda t: (t["best_val_loss_normalized_mse"], t["config"]["hidden_size"]))
+    assert trials["selected_config"] == winner["config"]
+    with pytest.raises(SystemExit, match="Refusing to overwrite"):  # a finished search is closed, even with --resume
+        run_stage_b.main(["search", "--resume", *urban])
+
+    assert run_stage_b.main(["final", *urban]) == 0
+    summary = json.loads((results / "urban" / "summary.json").read_text(encoding="utf-8"))
+    aggregate = summary["aggregate"]
+    assert [row["seed"] for row in aggregate["per_seed"]] == [42, 43, 44]
+    assert aggregate["gate_basis"] == "mean test MAE over seeds [42, 43, 44]"
+    assert summary["selection"]["search_reduced_due_to_time_limit"] is True
+    assert summary["selection"]["training_budget"]["max_epochs"] == 40
+    assert summary["selection"]["config_source_scenario"] == "urban"
+    assert summary["dataset"]["sha256"]["X_test.npy"] and summary["run_info"]["torch_threads"] == 2
+    for seed in (42, 43, 44):
+        seed_dir = results / "urban" / "final" / f"seed_{seed}"
+        seed_summary = json.loads((seed_dir / "summary.json").read_text(encoding="utf-8"))
+        assert seed_summary["config"]["seed"] == seed and seed_summary["history"]["val_loss"]
+        assert (seed_dir / "lstm_best.pt").exists() and (seed_dir / "predictions_test.npz").exists()
+    assert (results / "urban" / "training_curves.png").exists() and (results / "urban" / "actual_vs_predicted.png").exists()
+    with pytest.raises(SystemExit, match="Refusing to overwrite"):  # grid is closed
+        run_stage_b.main(["final", *urban])
+
+    # rural: no search of its own, the urban-selected config is reused unchanged (only the seed varies)
+    assert not (results / "rural" / "search").exists()
+    assert run_stage_b.main(["final", *rural]) == 0
+    rural_summary = json.loads((results / "rural" / "summary.json").read_text(encoding="utf-8"))
+    assert rural_summary["selection"]["config_source_scenario"] == "urban"
+    assert rural_summary["config"] == summary["config"] == trials["selected_config"]
+    assert rural_summary["dataset"]["scenario"] == "rural"
+
+    assert run_stage_b.main(["supplementary", "--variant", "instantaneous", *urban]) == 0
+    sup = json.loads(
+        (results / "urban" / "supplementary" / "instantaneous" / "summary_aggregate.json").read_text(encoding="utf-8")
+    )
+    assert sup["aggregate"]["n_seeds"] == 1 and "single seed 42" in sup["aggregate"]["gate_basis"]
+    assert sup["selection"]["search_reduced_due_to_time_limit"] is True
+    with pytest.raises(SystemExit, match="not found"):  # no nosinr dataset was generated in this fixture
+        run_stage_b.main(["supplementary", "--variant", "nosinr", *urban])
+
+
+def test_eta_over_the_limit_pauses_after_the_first_trial_and_resumes_identically(
+    tiny_data_root, tmp_path, tiny_grid, capsys
+) -> None:
+    pytest.importorskip("torch", reason="PyTorch not installed: Stage B driver is NOT exercised")
+    results = tmp_path / "results"
+    urban = _common(tiny_data_root, results, "urban")
+    search_dir = results / "urban" / "search"
+
+    assert run_stage_b.main(["search", "--eta-limit-hours", "0", *urban]) == 3  # any ETA exceeds a 0 h limit
+    out = capsys.readouterr().out
+    assert "[eta] first trial took" in out and "wall-clock" in out and "ETA" in out
+    assert (search_dir / "ETA_EXCEEDED.txt").exists() and not (search_dir / "trials.json").exists()
+    first_row = (search_dir / "trials.jsonl").read_text().splitlines()
+    assert len(first_row) == 1
+
+    with pytest.raises(SystemExit, match="Refusing to overwrite"):  # no silent restart without --resume
+        run_stage_b.main(["search", *urban])
+
+    assert run_stage_b.main(["search", "--resume", "--accept-eta", *urban]) == 0
+    trials = json.loads((search_dir / "trials.json").read_text(encoding="utf-8"))
+    assert trials["n_trials"] == 2 and not (search_dir / "ETA_EXCEEDED.txt").exists()
+    kept = json.loads(first_row[0])
+    assert trials["trials"][0]["best_val_loss_normalized_mse"] == kept["best_val_loss_normalized_mse"]  # trial 1 not redone
+
+
+def test_eta_under_the_limit_does_not_pause(tiny_data_root, tmp_path, tiny_grid) -> None:
+    pytest.importorskip("torch", reason="PyTorch not installed: Stage B driver is NOT exercised")
+    results = tmp_path / "results"
+    assert run_stage_b.main(["search", *_common(tiny_data_root, results, "urban")]) == 0
+    assert not (results / "urban" / "search" / "ETA_EXCEEDED.txt").exists()
+
+
+def test_resume_refuses_a_log_that_does_not_match_the_grid(tiny_data_root, tmp_path, tiny_grid) -> None:
+    pytest.importorskip("torch", reason="PyTorch not installed: Stage B driver is NOT exercised")
+    results = tmp_path / "results"
+    search_dir = results / "urban" / "search"
+    search_dir.mkdir(parents=True)
+    (search_dir / "trials.jsonl").write_text(json.dumps({"index": 0, "config": {"hidden_size": 999}}) + "\n")
+
+    with pytest.raises(SystemExit, match="does not match the declared grid"):
+        run_stage_b.main(["search", "--resume", *_common(tiny_data_root, results, "urban")])
+
+
+def test_final_requires_the_urban_search_first(tiny_data_root, tmp_path) -> None:
     pytest.importorskip("torch", reason="PyTorch not installed: Stage B driver is NOT exercised")
     with pytest.raises(SystemExit, match="validation search first"):
-        run_stage_b.main(["final", "--scenario", "urban", "--data-root", str(tiny_data_root),
-                          "--results-root", str(tmp_path / "r"), "--threads", "2"])
+        run_stage_b.main(["final", *_common(tiny_data_root, tmp_path / "r", "rural")])

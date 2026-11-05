@@ -1,7 +1,8 @@
 """Stage B driver: validation-only search, 3-seed final training, supplementary variants.
 
-    python run_stage_b.py search        --scenario urban      # 12 configs, seed 42, validation only
-    python run_stage_b.py final         --scenario urban      # best config x seeds 42,43,44, test once each
+    python run_stage_b.py search        --scenario urban      # 5 configs, urban only, seed 42, validation only
+    python run_stage_b.py final         --scenario urban      # urban-selected config x seeds 42,43,44, test once each
+    python run_stage_b.py final         --scenario rural      # the SAME urban-selected config
     python run_stage_b.py supplementary --scenario urban --variant instantaneous   # chosen config, seed 42
 
 Everything is written under results/phase3/<scenario>/ with run_info. The three phases refuse to overwrite
@@ -27,6 +28,12 @@ from src.phase3_pipeline import Phase3RunResult, to_serializable_summary
 from src.phase3_plots import plot_actual_vs_predicted, plot_training_curves
 from src.phase3_prediction import LSTMTrainingConfig, PredictionStageResult, train_lstm_forecaster
 from src.phase3_search import (
+    DEFAULT_EARLY_STOPPING_PATIENCE,
+    DEFAULT_MAX_EPOCHS,
+    ORIGINAL_GRID_NOT_RUN,
+    REDUCTION_NOTE,
+    SEARCH_GRID,
+    SEARCH_SCENARIO,
     SEARCH_SELECTION_CRITERION,
     grid_configs,
     run_validation_search,
@@ -37,6 +44,12 @@ from src.reproducibility import collect_run_info
 PRIMARY_SEED = 42
 FINAL_SEEDS = (42, 43, 44)
 VARIANTS = {"instantaneous": "instantaneous", "nosinr": "nosinr"}
+DEFAULT_THREADS = 8  # torch CPU threads for the single running process (recorded in run_info)
+FOLLOW_UP_RUNS = len(FINAL_SEEDS) * 2  # final trainings: 3 seeds x {urban, rural}
+
+
+class _EtaExceeded(Exception):
+    """Raised after the first trial when the projected remaining time exceeds the limit."""
 
 
 def _json_default(value: Any) -> Any:
@@ -99,6 +112,36 @@ def _setup(args: argparse.Namespace) -> tuple[Path, Path]:
     return data_dir, out_dir
 
 
+def _amendment() -> dict[str, Any]:
+    return {
+        "search_reduced_due_to_time_limit": True,
+        "note": REDUCTION_NOTE,
+        "original_grid_not_run": ORIGINAL_GRID_NOT_RUN,
+        "search_scenario": SEARCH_SCENARIO,
+        "training_budget": {"max_epochs": DEFAULT_MAX_EPOCHS, "early_stopping_patience": DEFAULT_EARLY_STOPPING_PATIENCE,
+                            "batch_size": 64},
+        "grid": [{"hidden_size": h, "learning_rate": lr, "num_layers": n} for h, lr, n in SEARCH_GRID],
+    }
+
+
+def _load_selected_config(results_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Config chosen by the urban search (used for every scenario) and its selection record."""
+    path = results_root / SEARCH_SCENARIO / "search" / "trials.json"
+    if not path.exists():
+        sys.exit(f"Run the validation search first (no {path.as_posix()}).")
+    search = json.loads(path.read_text(encoding="utf-8"))
+    selection = {
+        "criterion": search["selection_criterion"],
+        "trials_file": f"{SEARCH_SCENARIO}/search/trials.json",
+        "config_source_scenario": SEARCH_SCENARIO,
+        "search_seed": search["search_seed"],
+        "n_trials": search["n_trials"],
+        "selected_index": search["selected_index"],
+        **search["protocol_amendment"],
+    }
+    return search["selected_config"], selection
+
+
 def _check_dataset_kind(info: dict[str, Any], *, target_kind: str, masked: list[str]) -> None:
     if info["target_kind"] != target_kind or info["masked_features"] != masked:
         sys.exit(f"Dataset {info['directory']} is target={info['target_kind']} masked={info['masked_features']}; "
@@ -106,28 +149,63 @@ def _check_dataset_kind(info: dict[str, Any], *, target_kind: str, masked: list[
 
 
 # ------------------------------------------------------------------------------------------ search
+def _fmt_duration(seconds: float) -> str:
+    return f"{seconds / 3600:.2f} h ({seconds / 60:.0f} min)"
+
+
 def phase_search(args: argparse.Namespace) -> int:
+    if args.scenario != SEARCH_SCENARIO:
+        sys.exit(f"The search runs on {SEARCH_SCENARIO} only (reduced protocol); rural reuses the {SEARCH_SCENARIO}-selected config.")
     data_dir, out_dir = _setup(args)
     search_dir = out_dir / "search"
-    _require_clean_output(search_dir)
+    log_path = search_dir / "trials.jsonl"
+    if (search_dir / "trials.json").exists():
+        sys.exit(f"Refusing to overwrite {search_dir}: the search is complete and the grid is closed.")
+    done: list[dict[str, Any]] = []
+    if args.resume:
+        if log_path.exists():
+            done = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    else:
+        _require_clean_output(search_dir)
     info = _dataset_info(data_dir)
     _check_dataset_kind(info, target_kind="local_mean", masked=[])
     split = load_phase3_dataset(data_dir, require_pre_split=True)
 
     configs = grid_configs(seed=PRIMARY_SEED, device="cpu")
+    if [row["config"] for row in done] != [asdict(c) for c in configs[: len(done)]]:
+        sys.exit("Existing trials.jsonl does not match the declared grid order; cannot resume.")
     search_dir.mkdir(parents=True, exist_ok=True)
-    log_path = search_dir / "trials.jsonl"
+    trials: list[dict[str, Any]] = [{k: v for k, v in row.items() if k != "index"} for row in done]
+    offset = len(done)
 
-    def on_trial(index: int, trial: dict[str, Any]) -> None:
+    def on_trial(local_index: int, trial: dict[str, Any]) -> None:
+        index = offset + local_index
         with log_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps({"index": index, **trial}) + "\n")
         c = trial["config"]
         print(f"[{args.scenario}] trial {index + 1}/{len(configs)} hidden={c['hidden_size']} layers={c['num_layers']} "
-              f"lr={c['learning_rate']:g}: val MAE {trial['val_mae_db']:.4f} dB, best epoch {trial['best_epoch']}/"
-              f"{trial['epochs_run']}, {trial['seconds']:.0f}s", flush=True)
+              f"lr={c['learning_rate']:g}: val loss {trial['best_val_loss_normalized_mse']:.5f} "
+              f"(val MAE {trial['val_mae_db']:.4f} dB), best epoch {trial['best_epoch']}/{trial['epochs_run']}, "
+              f"wall-clock {trial['seconds']:.0f}s", flush=True)
+        if index == 0:
+            remaining_runs = (len(configs) - 1) + FOLLOW_UP_RUNS
+            eta = remaining_runs * trial["seconds"]
+            print(f"[eta] first trial took {trial['seconds']:.0f}s. Crude ETA for the {remaining_runs} remaining runs "
+                  f"(search {len(configs) - 1} + {len(FINAL_SEEDS)} seeds x 2 scenarios, "
+                  f"assuming each run costs about as much as this one): {_fmt_duration(eta)}", flush=True)
+            if eta > args.eta_limit_hours * 3600 and not args.accept_eta:
+                raise _EtaExceeded(f"ETA {_fmt_duration(eta)} exceeds {args.eta_limit_hours:g} h")
 
-    # Only train/validation arrays are passed: the test split cannot influence selection.
-    trials = run_validation_search(split.X_train, split.y_train, split.X_val, split.y_val, configs, on_trial=on_trial)
+    try:
+        new_trials = run_validation_search(
+            split.X_train, split.y_train, split.X_val, split.y_val, configs[offset:], on_trial=on_trial
+        )
+    except _EtaExceeded as stop:
+        (search_dir / "ETA_EXCEEDED.txt").write_text(f"{stop}\nRe-run with --resume --accept-eta to continue.\n", encoding="utf-8")
+        print(f"[eta] STOPPING after the first trial: {stop}. Re-run with --resume --accept-eta to continue.", flush=True)
+        return 3
+    # Only train/validation arrays were passed: the test split cannot influence selection.
+    trials += new_trials
     selected = select_best(trials)
     _write_json(
         search_dir / "trials.json",
@@ -138,11 +216,13 @@ def phase_search(args: argparse.Namespace) -> int:
             "n_trials": len(trials),
             "selected_index": selected,
             "selected_config": trials[selected]["config"],
+            "protocol_amendment": _amendment(),
             "trials": trials,
             "dataset": info,
             "run_info": _run_info(PRIMARY_SEED, args),
         },
     )
+    (search_dir / "ETA_EXCEEDED.txt").unlink(missing_ok=True)
     print(f"[{args.scenario}] selected trial {selected + 1}: {trials[selected]['config']}")
     return 0
 
@@ -186,14 +266,10 @@ def phase_final(args: argparse.Namespace) -> int:
     data_dir, out_dir = _setup(args)
     final_dir = out_dir / "final"
     _require_clean_output(final_dir)
-    selected_path = out_dir / "search" / "trials.json"
-    if not selected_path.exists():
-        sys.exit("Run the validation search first (no search/trials.json).")
-    search = json.loads(selected_path.read_text(encoding="utf-8"))
+    base, selection = _load_selected_config(Path(args.results_root))
     info = _dataset_info(data_dir)
     _check_dataset_kind(info, target_kind="local_mean", masked=[])
     split = load_phase3_dataset(data_dir, require_pre_split=True)
-    base = search["selected_config"]
 
     results = {}
     for seed in FINAL_SEEDS:
@@ -210,8 +286,7 @@ def phase_final(args: argparse.Namespace) -> int:
             "scenario": args.scenario,
             "stage": "B - LSTM, local-mean target, primary result",
             "config": base,
-            "selection": {"criterion": search["selection_criterion"], "trials_file": "search/trials.json",
-                          "search_seed": search["search_seed"], "n_trials": search["n_trials"]},
+            "selection": selection,
             "aggregate": aggregate,
             "legacy_within_10pct_accuracy_informational": {
                 str(s): results[s].test_metrics.within_10pct_accuracy for s in FINAL_SEEDS
@@ -256,10 +331,7 @@ def phase_supplementary(args: argparse.Namespace) -> int:
     data_dir, out_dir = _setup(args)
     variant_dir = out_dir / "supplementary" / args.variant
     _require_clean_output(variant_dir)
-    search_path = out_dir / "search" / "trials.json"
-    if not search_path.exists():
-        sys.exit("Run the validation search first (no search/trials.json).")
-    base = json.loads(search_path.read_text(encoding="utf-8"))["selected_config"]
+    base, selection = _load_selected_config(Path(args.results_root))
     info = _dataset_info(data_dir)
     if args.variant == "instantaneous":
         _check_dataset_kind(info, target_kind="instantaneous", masked=[])
@@ -274,7 +346,8 @@ def phase_supplementary(args: argparse.Namespace) -> int:
     aggregate["gate_basis"] = f"single seed {PRIMARY_SEED} (supplementary run; gates informational)"
     _write_json(
         variant_dir / "summary_aggregate.json",
-        {"scenario": args.scenario, "variant": args.variant, "note": note, "config": base, "aggregate": aggregate,
+        {"scenario": args.scenario, "variant": args.variant, "note": note, "config": base, "selection": selection,
+         "aggregate": aggregate,
          "dataset": info, "run_info": _run_info(PRIMARY_SEED, args)},
     )
     plot_training_curves(
@@ -296,7 +369,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--variant", choices=sorted(VARIANTS), default=None, help="supplementary phase only")
     parser.add_argument("--data-root", default="data/phase3")
     parser.add_argument("--results-root", default="results/phase3")
-    parser.add_argument("--threads", type=int, default=8, help="torch CPU threads (recorded in run_info)")
+    parser.add_argument("--threads", type=int, default=DEFAULT_THREADS, help="torch CPU threads (recorded in run_info)")
+    parser.add_argument("--resume", action="store_true", help="search only: continue an interrupted/paused search")
+    parser.add_argument("--eta-limit-hours", type=float, default=2.0,
+                        help="search only: stop after the first trial if the projected remaining time exceeds this")
+    parser.add_argument("--accept-eta", action="store_true", help="search only: continue despite an ETA above the limit")
     return parser
 
 
