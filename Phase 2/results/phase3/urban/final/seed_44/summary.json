@@ -1,0 +1,148 @@
+{
+  "prediction": {
+    "lstm": {
+      "best_epoch": 10,
+      "best_validation_loss": 0.11230238935368209,
+      "test_within_10pct_accuracy": 0.9423728813559322,
+      "test_normalized_mae": 0.039970908037634194,
+      "test_rmse": 3.896046329248283,
+      "target_accuracy": 0.8,
+      "meets_target": true,
+      "meets_final_target": false,
+      "test_db_metrics": {
+        "mae_db": 3.092434652296163,
+        "rmse_db": 3.896046329248283,
+        "within_1db": 0.20685499058380413,
+        "within_3db": 0.5644444444444444,
+        "persistence_mae_db": 4.909370493987635,
+        "persistence_rmse_db": 6.592990001983423,
+        "moving_average_mae_db": 3.9769653965026333,
+        "ar_mae_db": 3.231372570406293,
+        "best_baseline": "linear_ar_10",
+        "best_baseline_mae_db": 3.231372570406293,
+        "skill_vs_persistence": 0.3700954824893784,
+        "skill_vs_best_baseline": 0.042996564179122454,
+        "min_skill_required": 0.15,
+        "min_final_skill_required": 0.05,
+        "meets_prototype_target": true,
+        "meets_final_target": false
+      },
+      "checkpoint_path": "results\\phase3\\urban\\final\\seed_44\\lstm_best.pt",
+      "last_test_prediction": -89.82289123535156,
+      "last_test_target": -89.98914337158203
+    },
+    "transformer_executed": false,
+    "transformer": null
+  },
+  "mitigation": null,
+  "mitigation_skipped_reason": "Stage B: prediction only",
+  "config": {
+    "hidden_size": 128,
+    "num_layers": 1,
+    "dropout": 0.0,
+    "learning_rate": 0.0003,
+    "batch_size": 64,
+    "max_epochs": 40,
+    "early_stopping_patience": 6,
+    "weight_decay": 0.0,
+    "gradient_clip_norm": 1.0,
+    "device": "cpu",
+    "seed": 44
+  },
+  "history": {
+    "train_loss": [
+      0.1456201234095065,
+      0.11860448485938394,
+      0.11548499216916647,
+      0.11410547795830024,
+      0.11348852183410228,
+      0.11322488595592999,
+      0.11322195421055437,
+      0.11314803086992936,
+      0.1131174714619157,
+      0.11297775101695356,
+      0.11306691483869839,
+      0.11299219524287908,
+      0.1129462979596438,
+      0.11285719560476795,
+      0.11298048025077795,
+      0.11281676268341852
+    ],
+    "val_loss": [
+      0.11968037335156496,
+      0.11909280839107804,
+      0.1147432285266632,
+      0.1146691049941291,
+      0.11274685813096508,
+      0.1140026000400272,
+      0.11381002413799983,
+      0.11289581328854947,
+      0.11236093227192058,
+      0.11230238935368209,
+      0.11278145223631472,
+      0.1127056874034544,
+      0.11276346711676898,
+      0.11247869539563939,
+      0.11248091917590233,
+      0.11405352155704283
+    ]
+  },
+  "dataset": {
+    "directory": "data/phase3/urban",
+    "scenario": "urban",
+    "target_kind": "local_mean",
+    "target": "interference_local_dbm",
+    "target_definition": "interference (dBm) horizon_slots ahead with the fast-fading term removed",
+    "masked_features": [],
+    "window_counts": {
+      "train": 106200,
+      "val": 26550,
+      "test": 26550
+    },
+    "fast_fading_rho": 0.10238970661517889,
+    "slot_duration_s": 0.5,
+    "provenance": {
+      "seed": 1000,
+      "python": "3.13.3",
+      "platform": "Windows-11-10.0.26300-SP0",
+      "numpy": "2.5.4",
+      "torch": "2.15.0+cpu",
+      "cuda_available": false,
+      "generated_utc": "2026-11-05T05:05:09+00:00",
+      "git_sha": "0c972a06c1a9c36b89dfc05e231422100a5d8f07",
+      "git_dirty": false,
+      "scipy": "1.18.1"
+    },
+    "sha256": {
+      "X_test.npy": "c3bb1fd55cc007093556fe063d897d525d5bca27f1a2fa4d116df3b07b67f462",
+      "X_train.npy": "5e12ce4ed81dbdee063d0281182bed29f8cf1acb80ced5237d2ee18b6c9b637e",
+      "X_val.npy": "a79687f6f847726c45a051904750875d8b7380cd6bd34ef934d05faee83914fb",
+      "y_test.npy": "1e48e2fe869aad6b77103a806075c5b09a10e5cd672cb8d8fd53db8423bfc2d3",
+      "y_train.npy": "58c209da711042d9bd92ca0ddaeee19c6ed1c6eb96f8e67beaf04c404d561f6b",
+      "y_val.npy": "61d5143449803c57f48f908e39330990e9166f951205e0d0007a66985147d862"
+    }
+  },
+  "run_info": {
+    "seed": 44,
+    "python": "3.13.3",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "numpy": "2.5.4",
+    "torch": "2.15.0+cpu",
+    "cuda_available": false,
+    "generated_utc": "2026-11-05T06:43:43+00:00",
+    "git_sha": "9d4b3dc4df11ee458cd15147f7602213ed8a73f0",
+    "git_dirty": false,
+    "git_dirty_files": [],
+    "scipy": "1.18.1",
+    "argv": [
+      "final",
+      "--scenario",
+      "urban",
+      "--threads",
+      "8"
+    ],
+    "torch_threads": 8,
+    "phase": "final",
+    "note": null
+  }
+}
