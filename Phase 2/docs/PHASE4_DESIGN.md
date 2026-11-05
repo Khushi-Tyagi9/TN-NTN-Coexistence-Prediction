@@ -1,10 +1,11 @@
 # Phase 4 design: closed-loop null steering with reactive and proactive control
 
-**Status: proposal, written before any Phase 4 code or run (2026-11-05).** No code and no results exist for the
-simulator described here. The success and failure criteria in section 7 are fixed by committing this document. Changes
-before any Phase 4 result exists need a new commit with a changelog entry (section 10); after the first result exists
-the criteria, thresholds and the parameter table in section 8 are frozen. Open points that need a decision are in
-section 9.
+**Status: design, criteria fixed (2026-11-05).** Written, and the criteria confirmed by the project owner, **before any Phase 4
+run existed**: there is no closed-loop simulator, controller or evaluation run yet (the only Phase 4 code in the repository is the
+opt-in config options and the metric functions, commits `774431d` and `5b07dc4`, which have not been used on any Phase 4 data).
+On 2026-11-05 the owner accepted the ceiling-relative coverage criterion (A2) and kept every other threshold in section 7 as
+proposed, so sections 7 and 8 are **fixed**. Further changes need a new commit with a changelog entry (section 10), and none is allowed
+after the first Phase 4 result exists. The remaining items in section 9 are limitations, not open decisions.
 
 Inputs from earlier phases (all numbers come from saved files):
 
@@ -171,7 +172,8 @@ additionally requires the interval to exclude 0.
 
 ## 6. Implementation plan and acceptance tests (no code written yet)
 
-Planned modules: array/geometry helpers, ratio-model closed-loop simulator on top of `simulate_time_series` (new optional
+First implementation task: verify the interference-free coverage ceiling (section 9 item 1) from the simulator before any controller
+runs, and save it with `run_info`. Planned modules: array/geometry helpers, ratio-model closed-loop simulator on top of `simulate_time_series` (new optional
 arguments, defaults unchanged), controllers, evaluation script, results under `results/phase4/<scenario>/` with `run_info`
 exactly as in Stage B (clean tracked tree at run start, snapshot before running, overwrite refusal).
 
@@ -189,7 +191,7 @@ All thresholds apply at the primary configuration (section 5) unless stated. "Pr
 
 * A1 interference reduction >= 90% (project target) for the proactive controller;
 * A2 coverage >= 95% **of the interference-free ceiling** (that is, `coverage >= 0.95 x ceiling`; the absolute 95% target is not
-  attainable, section 9 item 1);
+  attainable; the ceiling is the value **measured by the simulator** on the evaluation runs, not the 81% hand estimate, section 9 item 1);
 * A3 NTN-user throughput degradation versus the interference-free reference < 5% (project target);
 * A4 own-user mean power loss <= 1 dB (about 1.6% uncapped Shannon throughput) and own-user throughput degradation < 5%;
 * A5 no ACIR point in 20-40 dB where the proactive controller's interference reduction is negative.
@@ -231,14 +233,19 @@ OOD ACIR points used to meet A or B; thresholds, trigger level, `M_max`, floor, 
 | predictor | Stage B seed-42 LSTM checkpoints; AR(10) fitted on the dataset train split |
 | compute | CPU only, one process; evaluation is cheap (no training in Phase 4) |
 
-## 9. Open decisions and known limitations
+## 9. Decisions taken and known limitations
 
-1. **The 95% coverage target is unattainable under the current link budget.** Hand calculation from the config constants (to be
-   confirmed by the first implementation test): satellite EIRP 80 dBm, 550 km, 2 GHz; signal -73.3 dBm at nadir (SNR 20.7 dB), -80.4 dBm at
-   the pass edges (SNR 13.6 dB). SNR >= 15 dB needs a slant range <= 1063 km, i.e. `|x| <= 909 km` of the +-1125 km pass, so the
-   **interference-free coverage ceiling is about 81%**, independent of any controller. Criterion A2 therefore uses the ceiling. Alternatives
-   for you to decide: keep the ceiling-relative criterion (proposed); lower the coverage SINR threshold (for example to 10 dB); or
-   change the satellite link budget or pass length. The last two change the channel model and would need a deliberate amendment.
+1. **The 95% coverage target is unattainable under the current link budget; criterion A2 is ceiling-relative (decided 2026-11-05).**
+   The figure below is a **hand calculation from the config constants, not a measurement, and it still has to be verified**:
+   satellite EIRP 80 dBm, 550 km, 2 GHz; signal -73.3 dBm at nadir (SNR 20.7 dB), -80.4 dBm at the pass edges (SNR 13.6 dB).
+   SNR >= 15 dB needs a slant range <= 1063 km, i.e. `|x| <= 909 km` of the +-1125 km pass, so the interference-free coverage
+   ceiling would be **about 81%**, independent of any controller. (It ignores the 0.3 dB signal jitter and the users' small offsets
+   from the sub-satellite line.)
+   *Verification step (first implementation task, before any controller runs):* compute the interference-free coverage (share of
+   user-slots with SNR >= 15 dB) from the simulator itself on the evaluation runs and store it with `run_info`.
+   **Criterion A2 uses that measured ceiling, never the 81% hand estimate.** If the measured value differs from 81%, A2 stays
+   ceiling-relative with the measured value; the other thresholds do not change. Not chosen: lowering the coverage SINR
+   threshold or changing the satellite link budget or pass length, which would change the channel model.
 2. Ratio model: the absolute array pattern is not recomputed, so the baseline interference does not depend on N.
 3. Sensing is noise-free and un-nulled-equivalent; real reports would be noisy and delayed (a future sensitivity).
 4. Position error is the only direction error modelled; no calibration drift, mutual coupling, wideband or elevation effects.
@@ -246,9 +253,14 @@ OOD ACIR points used to meet A or B; thresholds, trigger level, `M_max`, floor, 
 6. TN user is single and stationary; own-user SINR ignores other-cell interference and any satellite interference into TN users.
 7. Uncapped Shannon throughput overstates own-user rates; the dB cost is the primary cost metric.
 8. The LSTM was trained on ACIR 20-40 dB; proactive results outside it are OOD and excluded from the criteria.
-9. Thresholds in section 7 (>= 2 pp, >= 1 pp, 1 dB, 50%) are proposals made without having seen any Phase 4 data; please confirm or
-   change them **before** implementation starts.
+9. The thresholds in section 7 (>= 90% reduction, coverage >= 0.95 x ceiling, < 5% throughput degradation, own-user loss <= 1 dB,
+   >= 2 pp proactive over reactive(1), >= 1 pp LSTM over AR(10), 50% for Partial) were set without any Phase 4 data and were
+   **confirmed unchanged by the project owner on 2026-11-05**, still before any Phase 4 run. They are fixed.
 
 ## 10. Changelog
 
 * 2026-11-05: first version (proposal).
+* 2026-11-05 (same day, before any Phase 4 run): project owner accepted the ceiling-relative coverage criterion (A2) and kept all other
+  thresholds as proposed; status changed to "criteria fixed". Recorded that the 81% interference-free coverage figure is a hand
+  calculation still to be verified by the simulator (section 9 item 1) and that A2 uses the measured ceiling. No criterion, threshold or
+  parameter value changed.
