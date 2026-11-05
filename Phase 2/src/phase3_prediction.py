@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 
+from .reproducibility import seed_everything
 from .phase3_data import EXPECTED_FEATURE_COUNT, EXPECTED_LOOKBACK_SLOTS, Phase3DatasetSplit
 from .phase3_metrics import (
     DEFAULT_MIN_FINAL_SKILL,
@@ -54,8 +55,11 @@ class LSTMTrainingConfig:
     weight_decay: float = 0.0
     gradient_clip_norm: float = 1.0
     device: str | None = None
+    seed: int = 42
 
     def __post_init__(self) -> None:
+        if self.seed < 0:
+            raise ValueError("seed must be >= 0.")
         if not (64 <= self.hidden_size <= 128):
             raise ValueError("hidden_size must be within [64, 128] for project constraints.")
         if self.num_layers not in {1, 2}:
@@ -92,8 +96,11 @@ class TransformerTrainingConfig:
     weight_decay: float = 1e-4
     gradient_clip_norm: float = 1.0
     device: str | None = None
+    seed: int = 42
 
     def __post_init__(self) -> None:
+        if self.seed < 0:
+            raise ValueError("seed must be >= 0.")
         if self.d_model <= 0:
             raise ValueError("d_model must be > 0.")
         if self.num_heads <= 0:
@@ -181,7 +188,7 @@ def meets_prediction_target(metrics: PredictionMetrics, *, target_accuracy: floa
     return metrics.within_10pct_accuracy >= target_accuracy
 
 
-def _make_regression_loaders(split: Phase3DatasetSplit, batch_size: int) -> tuple[Any, Any, Any]:
+def _make_regression_loaders(split: Phase3DatasetSplit, batch_size: int, seed: int = 0) -> tuple[Any, Any, Any]:
     torch, _ = _require_torch()
     if batch_size <= 0:
         raise ValueError("batch_size must be > 0.")
@@ -191,7 +198,10 @@ def _make_regression_loaders(split: Phase3DatasetSplit, batch_size: int) -> tupl
         y_tensor = torch.from_numpy(np.asarray(y, dtype=np.float32).reshape(-1, 1))
         return torch.utils.data.TensorDataset(x_tensor, y_tensor)
 
-    train_loader = torch.utils.data.DataLoader(_dataset(split.X_train, split.y_train), batch_size=batch_size, shuffle=True)
+    shuffle_generator = torch.Generator().manual_seed(seed)
+    train_loader = torch.utils.data.DataLoader(
+        _dataset(split.X_train, split.y_train), batch_size=batch_size, shuffle=True, generator=shuffle_generator
+    )
     val_loader = torch.utils.data.DataLoader(_dataset(split.X_val, split.y_val), batch_size=batch_size, shuffle=False)
     test_loader = torch.utils.data.DataLoader(_dataset(split.X_test, split.y_test), batch_size=batch_size, shuffle=False)
     return train_loader, val_loader, test_loader
@@ -404,11 +414,12 @@ def train_lstm_forecaster(
     torch, _ = _require_torch()
     cfg = LSTMTrainingConfig() if config is None else config
     device = _resolve_device(torch, cfg.device)
+    seed_everything(cfg.seed)  # before model init so weights and shuffling are reproducible
     normalization = _fit_normalization(split)
     normalized_split = _apply_normalization(split, normalization)
 
     model = _build_lstm_model(cfg)
-    train_loader, val_loader, _ = _make_regression_loaders(normalized_split, cfg.batch_size)
+    train_loader, val_loader, _ = _make_regression_loaders(normalized_split, cfg.batch_size, seed=cfg.seed)
     model, best_epoch, best_val_loss = _fit_model(
         model=model,
         train_loader=train_loader,
@@ -479,11 +490,12 @@ def train_transformer_forecaster(
     torch, _ = _require_torch()
     cfg = TransformerTrainingConfig() if config is None else config
     device = _resolve_device(torch, cfg.device)
+    seed_everything(cfg.seed)  # before model init so weights and shuffling are reproducible
     normalization = _fit_normalization(split)
     normalized_split = _apply_normalization(split, normalization)
 
     model = _build_transformer_model(cfg)
-    train_loader, val_loader, _ = _make_regression_loaders(normalized_split, cfg.batch_size)
+    train_loader, val_loader, _ = _make_regression_loaders(normalized_split, cfg.batch_size, seed=cfg.seed)
     model, best_epoch, best_val_loss = _fit_model(
         model=model,
         train_loader=train_loader,

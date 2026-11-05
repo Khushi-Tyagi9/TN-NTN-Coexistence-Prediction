@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
+from src.phase3_drl import DrlEnvConfig, PPOTrainingConfig
 from src.phase3_pipeline import Phase3Gates, run_phase3_pipeline, to_serializable_summary
 from src.phase3_prediction import LSTMTrainingConfig, TransformerTrainingConfig
+from src.reproducibility import collect_run_info
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -16,7 +19,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--data-root", type=str, required=True, help="Directory containing Phase 3 .npy files.")
     parser.add_argument("--scenario", type=str, default=None, help="Scenario name prefix (e.g., urban, rural).")
-    parser.add_argument("--seed", type=int, default=42, help="Deterministic random seed.")
+    parser.add_argument("--seed", type=int, default=42, help="Seed for the split, model init, batch shuffling and PPO.")
     parser.add_argument("--checkpoint-dir", type=str, default="results/phase3/checkpoints", help="Directory for model checkpoints.")
     parser.add_argument("--summary-json", type=str, default="results/phase3/phase3_summary.json", help="Output JSON summary path.")
     parser.add_argument("--lstm-hidden-size", type=int, default=96, help="LSTM hidden size in [64,128].")
@@ -62,6 +65,24 @@ def _read_dataset_metadata(data_root: Path) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def build_training_configs(args: argparse.Namespace) -> tuple[LSTMTrainingConfig, TransformerTrainingConfig]:
+    """Training configs from CLI args; ``--seed`` seeds init and shuffling of both models."""
+    lstm_cfg = LSTMTrainingConfig(
+        hidden_size=args.lstm_hidden_size,
+        num_layers=args.lstm_layers,
+        max_epochs=args.lstm_epochs,
+        seed=args.seed,
+    )
+    transformer_cfg = TransformerTrainingConfig(
+        d_model=args.transformer_d_model,
+        num_heads=args.transformer_heads,
+        num_layers=args.transformer_layers,
+        max_epochs=args.transformer_epochs,
+        seed=args.seed,
+    )
+    return lstm_cfg, transformer_cfg
+
+
 def main() -> int:
     parser = build_argument_parser()
     args = parser.parse_args()
@@ -72,17 +93,7 @@ def main() -> int:
         lstm_min_final_skill=args.min_final_skill,
         zf_required_suppression_db=args.zf_required_db,
     )
-    lstm_cfg = LSTMTrainingConfig(
-        hidden_size=args.lstm_hidden_size,
-        num_layers=args.lstm_layers,
-        max_epochs=args.lstm_epochs,
-    )
-    transformer_cfg = TransformerTrainingConfig(
-        d_model=args.transformer_d_model,
-        num_heads=args.transformer_heads,
-        num_layers=args.transformer_layers,
-        max_epochs=args.transformer_epochs,
-    )
+    lstm_cfg, transformer_cfg = build_training_configs(args)
 
     result = run_phase3_pipeline(
         data_root=args.data_root,
@@ -98,8 +109,13 @@ def main() -> int:
         checkpoint_dir=args.checkpoint_dir,
         allow_window_shuffle=args.allow_window_shuffle,
         train_drl=args.run_drl,
+        env_config=DrlEnvConfig(seed=args.seed),
+        ppo_config=PPOTrainingConfig(seed=args.seed),
     )
     payload = to_serializable_summary(result)
+    payload["run_info"] = collect_run_info(
+        args.seed, extra={"argv": sys.argv[1:], "data_root": str(args.data_root), "scenario": args.scenario}
+    )
     summary_path = Path(args.summary_json)
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
