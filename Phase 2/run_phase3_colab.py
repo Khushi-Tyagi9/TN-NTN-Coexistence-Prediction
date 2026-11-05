@@ -53,6 +53,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow a random per-window split of unsplit X.npy/y.npy when no groups.npy exists (LEAKY; avoid).",
     )
+    parser.add_argument(
+        "--prediction-only",
+        action="store_true",
+        help="Train/evaluate the predictors only; do not run the mitigation stage.",
+    )
+    parser.add_argument(
+        "--no-transformer-fallback",
+        action="store_true",
+        help="Do not train the Transformer even if the LSTM misses the prototype gate.",
+    )
     parser.add_argument("--run-drl", action="store_true", help="Train PPO after ZF gate passes.")
     return parser
 
@@ -83,51 +93,12 @@ def build_training_configs(args: argparse.Namespace) -> tuple[LSTMTrainingConfig
     return lstm_cfg, transformer_cfg
 
 
-def main() -> int:
-    parser = build_argument_parser()
-    args = parser.parse_args()
-
-    gates = Phase3Gates(
-        lstm_target_accuracy=args.target_accuracy,
-        lstm_min_skill_vs_persistence=args.min_skill,
-        lstm_min_final_skill=args.min_final_skill,
-        zf_required_suppression_db=args.zf_required_db,
-    )
-    lstm_cfg, transformer_cfg = build_training_configs(args)
-
-    result = run_phase3_pipeline(
-        data_root=args.data_root,
-        scenario=args.scenario,
-        seed=args.seed,
-        desired_angle_rad=args.desired_angle_rad,
-        ntn_angle_rad=args.ntn_angle_rad,
-        antenna_count=args.antenna_count,
-        max_tracking_offset_rad=args.max_tracking_offset_rad,
-        gates=gates,
-        lstm_config=lstm_cfg,
-        transformer_config=transformer_cfg,
-        checkpoint_dir=args.checkpoint_dir,
-        allow_window_shuffle=args.allow_window_shuffle,
-        train_drl=args.run_drl,
-        env_config=DrlEnvConfig(seed=args.seed),
-        ppo_config=PPOTrainingConfig(seed=args.seed),
-    )
-    payload = to_serializable_summary(result)
-    payload["run_info"] = collect_run_info(
-        args.seed, extra={"argv": sys.argv[1:], "data_root": str(args.data_root), "scenario": args.scenario}
-    )
-    summary_path = Path(args.summary_json)
-    summary_path.parent.mkdir(parents=True, exist_ok=True)
-    summary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-    print(
-        "LSTM test within-10%-error accuracy (legacy, informational): "
-        f"{payload['prediction']['lstm']['test_within_10pct_accuracy']:.4f}"
-    )
-    dataset_meta = _read_dataset_metadata(Path(args.data_root))
-    if dataset_meta is not None:
-        payload["dataset"] = {k: dataset_meta.get(k) for k in ("scenario", "target_kind", "target", "target_definition")}
-        print(f"Dataset target: {payload['dataset']['target_kind']} ({payload['dataset']['target']})")
+def _print_prediction_report(payload: dict) -> None:
+    dataset = payload.get("dataset")
+    if dataset is not None:
+        print(f"Dataset target: {dataset['target_kind']} ({dataset['target']})")
+    lstm_payload = payload["prediction"]["lstm"]
+    print(f"LSTM test within-10%-error accuracy (legacy, informational): {lstm_payload['test_within_10pct_accuracy']:.4f}")
     for model_name in ("lstm", "transformer"):
         model_payload = payload["prediction"][model_name]
         db = None if model_payload is None else model_payload["test_db_metrics"]
@@ -150,15 +121,70 @@ def main() -> int:
             f"[{model_name}] skill vs best baseline {db['skill_vs_best_baseline']:+.3f} "
             f"(need >= {db['min_final_skill_required']:.2f}) -> final gate: {db['meets_final_target']}"
         )
-    lstm_payload = payload["prediction"]["lstm"]
     print(f"LSTM prototype gate passed (gates mitigation): {lstm_payload['meets_target']}")
     print(f"LSTM final gate passed (reported only): {lstm_payload['meets_final_target']}")
-    summary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(f"Transformer fallback executed: {payload['prediction']['transformer_executed']}")
-    print(f"ZF suppression (dB): {payload['mitigation']['suppression_db']:.4f}")
-    print(f"Mitigation predictor: {payload['mitigation']['predictor_used']}")
-    print(f"ZF gate passed: {payload['mitigation']['zf_gate_passed']}")
-    print(f"PPO trained: {payload['mitigation']['ppo_trained']}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_argument_parser()
+    args = parser.parse_args(argv)
+
+    gates = Phase3Gates(
+        lstm_target_accuracy=args.target_accuracy,
+        lstm_min_skill_vs_persistence=args.min_skill,
+        lstm_min_final_skill=args.min_final_skill,
+        zf_required_suppression_db=args.zf_required_db,
+    )
+    lstm_cfg, transformer_cfg = build_training_configs(args)
+
+    result = run_phase3_pipeline(
+        data_root=args.data_root,
+        scenario=args.scenario,
+        seed=args.seed,
+        desired_angle_rad=args.desired_angle_rad,
+        ntn_angle_rad=args.ntn_angle_rad,
+        antenna_count=args.antenna_count,
+        max_tracking_offset_rad=args.max_tracking_offset_rad,
+        gates=gates,
+        lstm_config=lstm_cfg,
+        transformer_config=transformer_cfg,
+        checkpoint_dir=args.checkpoint_dir,
+        allow_window_shuffle=args.allow_window_shuffle,
+        run_transformer_if_eligible=not args.no_transformer_fallback,
+        skip_mitigation=args.prediction_only,
+        train_drl=args.run_drl,
+        env_config=DrlEnvConfig(seed=args.seed),
+        ppo_config=PPOTrainingConfig(seed=args.seed),
+    )
+    payload = to_serializable_summary(result)
+    payload["run_info"] = collect_run_info(
+        args.seed,
+        extra={
+            "argv": argv if argv is not None else sys.argv[1:],
+            "data_root": str(args.data_root),
+            "scenario": args.scenario,
+        },
+    )
+    dataset_meta = _read_dataset_metadata(Path(args.data_root))
+    if dataset_meta is not None:
+        payload["dataset"] = {
+            key: dataset_meta.get(key)
+            for key in ("scenario", "target_kind", "target", "target_definition", "masked_features", "provenance")
+        }
+    summary_path = Path(args.summary_json)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    summary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    _print_prediction_report(payload)
+    mitigation = payload["mitigation"]
+    if mitigation is None:
+        print(f"Mitigation not run: {payload['mitigation_skipped_reason']}")
+    else:
+        print(f"ZF suppression (dB): {mitigation['suppression_db']:.4f}")
+        print(f"Mitigation predictor: {mitigation['predictor_used']}")
+        print(f"ZF gate passed: {mitigation['zf_gate_passed']}")
+        print(f"PPO trained: {mitigation['ppo_trained']}")
     print(f"Summary written: {summary_path}")
     return 0
 

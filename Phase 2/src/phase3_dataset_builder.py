@@ -33,6 +33,7 @@ from .phase3_data import (
     Phase3DatasetSplit,
     save_phase3_dataset_split,
 )
+from .reproducibility import collect_run_info
 from .timeseries import FEATURE_NAMES, TimeSeriesConfig, simulate_time_series
 
 # target key -> TimeSeriesRun attribute / metadata name
@@ -234,6 +235,7 @@ def build_phase3_dataset(
         "split_unit": "run, stratified by (user_count, acir_db); no window overlap between splits",
         "window_counts": {"train": int(x_train.shape[0]), "val": int(x_val.shape[0]), "test": int(x_test.shape[0])},
         "runs": runs_meta,
+        "provenance": collect_run_info(build.base_seed),
     }
     return split, metadata
 

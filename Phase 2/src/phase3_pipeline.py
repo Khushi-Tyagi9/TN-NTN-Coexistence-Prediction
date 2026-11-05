@@ -58,7 +58,8 @@ class Phase3RunResult:
     """Complete Phase 3 orchestration outcome."""
 
     prediction: PredictionStageResult
-    mitigation: MitigationStageResult
+    mitigation: MitigationStageResult | None
+    mitigation_skipped_reason: str | None = None
 
 
 def run_prediction_track(
@@ -71,6 +72,7 @@ def run_prediction_track(
     transformer_config: TransformerTrainingConfig | None = None,
     checkpoint_dir: str | Path | None = None,
     allow_window_shuffle: bool = False,
+    run_transformer_if_eligible: bool = True,
 ) -> tuple[Phase3DatasetSplit, PredictionStageResult]:
     """Run Track A prediction in required order: LSTM first, Transformer as fallback."""
     active_gates = Phase3Gates() if gates is None else gates
@@ -84,7 +86,7 @@ def run_prediction_track(
         target_accuracy=active_gates.lstm_target_accuracy,
         min_skill=active_gates.lstm_min_skill_vs_persistence,
         min_final_skill=active_gates.lstm_min_final_skill,
-        run_transformer_if_eligible=True,
+        run_transformer_if_eligible=run_transformer_if_eligible,
         checkpoint_dir=checkpoint_dir,
     )
     return dataset, prediction_result
@@ -156,6 +158,16 @@ def run_mitigation_track(
     )
 
 
+def _mitigation_skip_reason(prediction_result: PredictionStageResult, skip_mitigation: bool) -> str | None:
+    """Why mitigation must not run (None = it may). A failed prototype gate is a result, not a crash."""
+    if skip_mitigation:
+        return "prediction-only run: mitigation stage not requested"
+    transformer = prediction_result.transformer
+    if prediction_result.lstm.meets_target or (transformer is not None and transformer.meets_target):
+        return None
+    return "no prediction model met the prototype gate; mitigation blocked"
+
+
 def run_phase3_pipeline(
     *,
     data_root: str | Path,
@@ -170,6 +182,8 @@ def run_phase3_pipeline(
     transformer_config: TransformerTrainingConfig | None = None,
     checkpoint_dir: str | Path | None = None,
     allow_window_shuffle: bool = False,
+    run_transformer_if_eligible: bool = True,
+    skip_mitigation: bool = False,
     train_drl: bool = False,
     env_config: DrlEnvConfig | None = None,
     ppo_config: PPOTrainingConfig | None = None,
@@ -184,7 +198,11 @@ def run_phase3_pipeline(
         transformer_config=transformer_config,
         checkpoint_dir=checkpoint_dir,
         allow_window_shuffle=allow_window_shuffle,
+        run_transformer_if_eligible=run_transformer_if_eligible,
     )
+    skipped_reason = _mitigation_skip_reason(prediction_result, skip_mitigation)
+    if skipped_reason is not None:
+        return Phase3RunResult(prediction=prediction_result, mitigation=None, mitigation_skipped_reason=skipped_reason)
     mitigation_result = run_mitigation_track(
         prediction_result=prediction_result,
         desired_angle_rad=desired_angle_rad,
@@ -259,7 +277,9 @@ def to_serializable_summary(result: Phase3RunResult) -> dict[str, Any]:
                 "last_test_target": transformer.last_test_target,
             },
         },
-        "mitigation": {
+        "mitigation": None
+        if result.mitigation is None
+        else {
             "desired_gain_db": result.mitigation.zf_result.desired_gain_db,
             "ntn_gain_db": result.mitigation.zf_result.ntn_gain_db,
             "suppression_db": result.mitigation.zf_result.suppression_db,
@@ -271,4 +291,5 @@ def to_serializable_summary(result: Phase3RunResult) -> dict[str, Any]:
             "zf_gate_passed": result.mitigation.zf_gate_passed,
             "ppo_trained": result.mitigation.ppo_trained,
         },
+        "mitigation_skipped_reason": result.mitigation_skipped_reason,
     }
