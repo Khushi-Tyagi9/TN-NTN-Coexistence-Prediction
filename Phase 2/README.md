@@ -23,6 +23,8 @@ The verified configuration is 142 passed, 0 skipped. `requirements_phase3_colab.
 Training runs record `run_info` (seed, library versions, git SHA/dirty flag, command line) in the
 summary JSON; `--seed` seeds the split, model initialisation, batch shuffling and PPO.
 
+`git_dirty_files` in `run_info` lists the tracked files that differ from the recorded commit as plain repo-relative paths (from `git diff --name-only -z`). Results saved before the fix of 2026-11-05 (for example the exploratory runs under `results/phase3/preliminary/`) contain stray quote characters in that list because `git status --porcelain` quotes paths with spaces; those saved files were deliberately left unchanged, and the content is still readable.
+
 ## Channel model (time-series simulator, `src/timeseries.py`)
 
 One run = one random scenario (`src/simulation.py`: user/gNB placement from the urban or rural preset)

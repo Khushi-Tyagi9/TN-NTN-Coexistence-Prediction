@@ -58,24 +58,35 @@ def seed_everything(seed: int, *, deterministic: bool = True) -> None:
         torch.backends.cudnn.benchmark = False
 
 
-def _git(*args: str) -> str | None:
+def _git(*args: str, cwd: Path | None = None, strip: bool = True) -> str | None:
     try:
         completed = subprocess.run(
-            ["git", *args], cwd=_REPO_ROOT, capture_output=True, text=True, timeout=10, check=True
+            ["git", *args], cwd=_REPO_ROOT if cwd is None else cwd, capture_output=True, text=True, timeout=10, check=True
         )
     except (OSError, subprocess.SubprocessError):
         return None
-    return completed.stdout.strip()
+    return completed.stdout.strip() if strip else completed.stdout
 
 
-def git_state() -> dict[str, Any]:
-    """Current commit SHA and whether tracked files have uncommitted changes (None if not a git repo)."""
-    sha = _git("rev-parse", "HEAD")
-    status = _git("status", "--porcelain", "--untracked-files=no")
-    dirty_files = None if status is None else sorted(line[3:].strip() for line in status.splitlines() if line.strip())
+def _parse_nul_separated_paths(raw: str) -> list[str]:
+    """Paths from ``git ... -z`` output: NUL-separated, never quoted or escaped, so used verbatim."""
+    return sorted(path for path in raw.split("\0") if path)
+
+
+def git_state(repo_root: Path | None = None) -> dict[str, Any]:
+    """Current commit SHA and the tracked files that differ from it (staged or not).
+
+    ``git_dirty_files`` holds plain repo-relative paths. They come from ``git diff --name-only -z``, which does not quote
+    paths with spaces (``git status --porcelain`` does, which used to leave stray quote characters in this list).
+    Untracked files are not counted. All values are None when ``repo_root`` is not a git repository.
+    """
+    root = _REPO_ROOT if repo_root is None else Path(repo_root)
+    sha = _git("rev-parse", "HEAD", cwd=root)
+    changed = _git("diff", "--name-only", "--no-renames", "-z", "HEAD", cwd=root, strip=False)
+    dirty_files = None if changed is None else _parse_nul_separated_paths(changed)
     return {
         "git_sha": sha or None,
-        "git_dirty": None if status is None else bool(status),
+        "git_dirty": None if dirty_files is None else bool(dirty_files),
         "git_dirty_files": dirty_files,  # tracked files that differ from the commit (so a dirty flag is explainable)
     }
 
