@@ -28,7 +28,9 @@ python run_phase3_colab.py \
 
 Expected dataset layout (`.npy`):
 
-1. Pre-split: `X_train.npy`, `y_train.npy`, `X_val.npy`, `y_val.npy`, `X_test.npy`, `y_test.npy`
+1. Pre-split: `X_train.npy`, `y_train.npy`, `X_val.npy`, `y_val.npy`, `X_test.npy`, `y_test.npy`, or per scenario
+   `X_<scenario>_<split>.npy` / `y_<scenario>_<split>.npy` (these win when `--scenario` is given). Written by
+   `save_phase3_dataset_split(split, dir, scenario=...)`. Legacy `<scenario>_X_<split>.npy` still loads, with a warning.
 2. Or unsplit: `X.npy`, `y.npy` **plus `groups.npy`** (one run id per window). The loader splits by run id
    (~70/15/15 of runs) so overlapping windows never straddle train/val/test. Without `groups.npy` loading fails;
    `--allow-window-shuffle` forces a random window split, which LEAKS test targets into training and must not

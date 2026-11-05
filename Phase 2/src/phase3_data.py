@@ -225,34 +225,58 @@ def window_overlap_fraction(
     return float(np.mean(hit))
 
 
-def _try_load_presplit(root: Path, *, scenario: str | None = None) -> Phase3DatasetSplit | None:
-    naming_variants: list[tuple[str, str, str, str, str, str]] = [
-        ("X_train.npy", "y_train.npy", "X_val.npy", "y_val.npy", "X_test.npy", "y_test.npy")
-    ]
-    if scenario:
-        naming_variants.append(
-            (
-                f"X_{scenario}_train.npy",
-                f"y_{scenario}_train.npy",
-                f"X_{scenario}_val.npy",
-                f"y_{scenario}_val.npy",
-                f"X_{scenario}_test.npy",
-                f"y_{scenario}_test.npy",
-            )
-        )
+_SPLIT_ORDER = ("train", "val", "test")
 
-    for names in naming_variants:
-        paths = [root / name for name in names]
-        if all(path.exists() for path in paths):
-            return Phase3DatasetSplit(
-                X_train=_load_array(paths[0]),
-                y_train=_load_array(paths[1]),
-                X_val=_load_array(paths[2]),
-                y_val=_load_array(paths[3]),
-                X_test=_load_array(paths[4]),
-                y_test=_load_array(paths[5]),
+
+def _split_file_names(scenario: str | None, *, legacy: bool = False) -> tuple[str, ...]:
+    """(X_train, y_train, X_val, y_val, X_test, y_test) file names.
+
+    Canonical: ``X_<scenario>_<split>.npy`` (or ``X_<split>.npy`` without a scenario).
+    Legacy (written by older ``save_phase3_dataset_split(prefix=...)``): ``<scenario>_X_<split>.npy``.
+    """
+    names: list[str] = []
+    for split_name in _SPLIT_ORDER:
+        for array_name in ("X", "y"):
+            if scenario is None:
+                names.append(f"{array_name}_{split_name}.npy")
+            elif legacy:
+                names.append(f"{scenario}_{array_name}_{split_name}.npy")
+            else:
+                names.append(f"{array_name}_{scenario}_{split_name}.npy")
+    return tuple(names)
+
+
+def _load_split_files(root: Path, names: tuple[str, ...]) -> Phase3DatasetSplit | None:
+    paths = [root / name for name in names]
+    if not all(path.exists() for path in paths):
+        return None
+    return Phase3DatasetSplit(
+        X_train=_load_array(paths[0]),
+        y_train=_load_array(paths[1]),
+        X_val=_load_array(paths[2]),
+        y_val=_load_array(paths[3]),
+        X_test=_load_array(paths[4]),
+        y_test=_load_array(paths[5]),
+    )
+
+
+def _try_load_presplit(root: Path, *, scenario: str | None = None) -> Phase3DatasetSplit | None:
+    """Pre-split files. With a scenario, its own files win over the unprefixed ``X_train.npy`` set,
+    so a shared folder can never silently serve another scenario's data."""
+    if scenario:
+        loaded = _load_split_files(root, _split_file_names(scenario))
+        if loaded is not None:
+            return loaded
+        loaded = _load_split_files(root, _split_file_names(scenario, legacy=True))
+        if loaded is not None:
+            warnings.warn(
+                f"Loaded legacy file names '{scenario}_X_<split>.npy'; re-save with "
+                f"save_phase3_dataset_split(..., scenario='{scenario}') to get 'X_{scenario}_<split>.npy'.",
+                DeprecationWarning,
+                stacklevel=3,
             )
-    return None
+            return loaded
+    return _load_split_files(root, _split_file_names(None))
 
 
 def _first_existing(root: Path, names: list[str]) -> Path | None:
@@ -323,16 +347,27 @@ def save_phase3_dataset_split(
     split: Phase3DatasetSplit,
     output_root: str | Path,
     *,
+    scenario: str | None = None,
     prefix: str = "",
 ) -> None:
-    """Persist a validated split as .npy arrays."""
+    """Persist a validated split as .npy arrays that ``load_phase3_dataset`` can read back.
+
+    Without ``scenario``: ``X_train.npy`` ... ``y_test.npy``. With ``scenario``:
+    ``X_<scenario>_train.npy`` ... (several scenarios can share one folder).
+    ``prefix`` is a deprecated alias of ``scenario``; it used to write ``<prefix>_X_train.npy``,
+    which the loader never found, and now writes the canonical scenario names.
+    """
+    if prefix:
+        if scenario is not None and scenario != prefix:
+            raise ValueError("Pass either scenario or the deprecated prefix, not both.")
+        warnings.warn("'prefix' is deprecated; use 'scenario'.", DeprecationWarning, stacklevel=2)
+        scenario = prefix
+
     root = Path(output_root)
     root.mkdir(parents=True, exist_ok=True)
-    normalized_prefix = f"{prefix}_" if prefix else ""
-
-    np.save(root / f"{normalized_prefix}X_train.npy", split.X_train)
-    np.save(root / f"{normalized_prefix}y_train.npy", split.y_train)
-    np.save(root / f"{normalized_prefix}X_val.npy", split.X_val)
-    np.save(root / f"{normalized_prefix}y_val.npy", split.y_val)
-    np.save(root / f"{normalized_prefix}X_test.npy", split.X_test)
-    np.save(root / f"{normalized_prefix}y_test.npy", split.y_test)
+    names = _split_file_names(scenario)
+    arrays = (
+        split.X_train, split.y_train, split.X_val, split.y_val, split.X_test, split.y_test,
+    )
+    for name, array in zip(names, arrays):
+        np.save(root / name, array)

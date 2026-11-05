@@ -131,3 +131,92 @@ def test_loader_prefers_scenario_specific_groups_file(tmp_path) -> None:
     split = load_phase3_dataset(tmp_path, scenario="urban", seed=1)
 
     assert window_overlap_fraction(split.X_train, split.X_test) == 0.0
+
+
+# --- audit M1: saver/loader file naming must round-trip -------------------------------------------
+
+from src.phase3_data import Phase3DatasetSplit, save_phase3_dataset_split  # noqa: E402
+
+
+def _tiny_split(offset: float = 0.0) -> Phase3DatasetSplit:
+    rng = np.random.default_rng(int(offset) + 1)
+
+    def part(n: int):
+        return rng.normal(size=(n, 10, 3)).astype(np.float32) + offset, rng.normal(size=n).astype(np.float32) + offset
+
+    (xt, yt), (xv, yv), (xs, ys) = part(8), part(3), part(3)
+    return Phase3DatasetSplit(xt, yt, xv, yv, xs, ys)
+
+
+def _assert_same(a: Phase3DatasetSplit, b: Phase3DatasetSplit) -> None:
+    for name in ("X_train", "y_train", "X_val", "y_val", "X_test", "y_test"):
+        assert np.array_equal(getattr(a, name), getattr(b, name)), name
+
+
+def test_round_trip_without_scenario(tmp_path) -> None:
+    split = _tiny_split()
+    save_phase3_dataset_split(split, tmp_path)
+
+    assert (tmp_path / "X_train.npy").exists()
+    _assert_same(load_phase3_dataset(tmp_path, require_pre_split=True), split)
+
+
+def test_round_trip_with_scenario_uses_canonical_names(tmp_path) -> None:
+    split = _tiny_split()
+    save_phase3_dataset_split(split, tmp_path, scenario="urban")
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
+        f"{a}_urban_{s}.npy" for a in ("X", "y") for s in ("train", "val", "test")
+    )
+    _assert_same(load_phase3_dataset(tmp_path, scenario="urban", require_pre_split=True), split)
+
+
+def test_two_scenarios_share_one_folder_without_mixing(tmp_path) -> None:
+    urban, rural = _tiny_split(0.0), _tiny_split(100.0)
+    save_phase3_dataset_split(urban, tmp_path, scenario="urban")
+    save_phase3_dataset_split(rural, tmp_path, scenario="rural")
+
+    _assert_same(load_phase3_dataset(tmp_path, scenario="urban"), urban)
+    _assert_same(load_phase3_dataset(tmp_path, scenario="rural"), rural)
+
+
+def test_scenario_files_win_over_unprefixed_files(tmp_path) -> None:
+    plain, urban = _tiny_split(0.0), _tiny_split(50.0)
+    save_phase3_dataset_split(plain, tmp_path)
+    save_phase3_dataset_split(urban, tmp_path, scenario="urban")
+
+    _assert_same(load_phase3_dataset(tmp_path, scenario="urban"), urban)
+    _assert_same(load_phase3_dataset(tmp_path), plain)
+    _assert_same(load_phase3_dataset(tmp_path, scenario="rural"), plain)  # no rural files -> plain fallback
+
+
+def test_deprecated_prefix_now_writes_loadable_names(tmp_path) -> None:
+    split = _tiny_split()
+    with pytest.warns(DeprecationWarning, match="prefix"):
+        save_phase3_dataset_split(split, tmp_path, prefix="urban")
+
+    assert (tmp_path / "X_urban_train.npy").exists() and not (tmp_path / "urban_X_train.npy").exists()
+    _assert_same(load_phase3_dataset(tmp_path, scenario="urban"), split)  # the original bug: this raised
+    with pytest.raises(ValueError, match="not both"):
+        save_phase3_dataset_split(split, tmp_path, scenario="rural", prefix="urban")
+
+
+def test_legacy_prefixed_files_still_load_with_a_warning(tmp_path) -> None:
+    split = _tiny_split()
+    for name, array in zip(
+        ("urban_X_train", "urban_y_train", "urban_X_val", "urban_y_val", "urban_X_test", "urban_y_test"),
+        (split.X_train, split.y_train, split.X_val, split.y_val, split.X_test, split.y_test),
+    ):
+        np.save(tmp_path / f"{name}.npy", array)
+
+    with pytest.warns(DeprecationWarning, match="legacy file names"):
+        loaded = load_phase3_dataset(tmp_path, scenario="urban")
+    _assert_same(loaded, split)
+
+
+def test_missing_split_file_is_not_silently_ignored(tmp_path) -> None:
+    save_phase3_dataset_split(_tiny_split(), tmp_path, scenario="urban")
+    (tmp_path / "y_urban_test.npy").unlink()
+
+    with pytest.raises(FileNotFoundError):
+        load_phase3_dataset(tmp_path, scenario="urban")
