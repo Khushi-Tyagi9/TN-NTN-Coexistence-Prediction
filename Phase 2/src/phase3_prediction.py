@@ -9,7 +9,14 @@ from typing import Any
 import numpy as np
 
 from .phase3_data import EXPECTED_FEATURE_COUNT, EXPECTED_LOOKBACK_SLOTS, Phase3DatasetSplit
-from .phase3_metrics import PredictionMetrics, evaluate_prediction_metrics
+from .phase3_metrics import (
+    DEFAULT_MIN_SKILL_VS_PERSISTENCE,
+    DbMetrics,
+    PredictionMetrics,
+    evaluate_db_metrics,
+    evaluate_prediction_metrics,
+    meets_skill_gate,
+)
 
 
 def _require_torch() -> tuple[Any, Any]:
@@ -126,8 +133,13 @@ class PredictionModelResult:
     last_test_target: float = 0.0
     test_target_min: float = 0.0
     test_target_max: float = 0.0
+    validation_db_metrics: DbMetrics | None = None
+    test_db_metrics: DbMetrics | None = None
+    min_skill: float = DEFAULT_MIN_SKILL_VS_PERSISTENCE
 
     def __post_init__(self) -> None:
+        if not (0.0 <= self.min_skill < 1.0):
+            raise ValueError("min_skill must be in [0, 1).")
         if not self.model_name.strip():
             raise ValueError("model_name cannot be empty.")
         if self.best_epoch <= 0:
@@ -153,7 +165,10 @@ class PredictionStageResult:
 
 
 def meets_prediction_target(metrics: PredictionMetrics, *, target_accuracy: float = 0.80) -> bool:
-    """Evaluate prototype gate based on within-10%-error accuracy."""
+    """Legacy within-10%-relative-error check. INFORMATIONAL ONLY.
+
+    On dBm targets this is trivially met by a persistence baseline (AUDIT.md C1);
+    stage gating uses ``meets_skill_gate`` instead."""
     if not (0 < target_accuracy <= 1):
         raise ValueError("target_accuracy must be in (0, 1].")
     return metrics.within_10pct_accuracy >= target_accuracy
@@ -374,6 +389,7 @@ def train_lstm_forecaster(
     *,
     config: LSTMTrainingConfig | None = None,
     target_accuracy: float = 0.80,
+    min_skill: float = DEFAULT_MIN_SKILL_VS_PERSISTENCE,
     checkpoint_path: str | Path | None = None,
 ) -> PredictionModelResult:
     """Train and evaluate the LSTM forecaster."""
@@ -403,6 +419,8 @@ def train_lstm_forecaster(
     test_predictions = normalization.inverse_targets(test_predictions_scaled)
     validation_metrics = evaluate_prediction_metrics(split.y_val, val_predictions)
     test_metrics = evaluate_prediction_metrics(split.y_test, test_predictions)
+    validation_db_metrics = evaluate_db_metrics(split.y_val, val_predictions, split.X_val)
+    test_db_metrics = evaluate_db_metrics(split.y_test, test_predictions, split.X_test)
     last_test_prediction = float(test_predictions[-1])
     last_test_target = float(np.asarray(split.y_test, dtype=np.float32)[-1])
     test_target_min = float(np.min(split.y_test))
@@ -421,7 +439,10 @@ def train_lstm_forecaster(
         validation_metrics=validation_metrics,
         test_metrics=test_metrics,
         target_accuracy=target_accuracy,
-        meets_target=meets_prediction_target(test_metrics, target_accuracy=target_accuracy),
+        meets_target=meets_skill_gate(test_db_metrics, min_skill=min_skill),
+        validation_db_metrics=validation_db_metrics,
+        test_db_metrics=test_db_metrics,
+        min_skill=min_skill,
         checkpoint_path=saved_checkpoint,
         last_test_prediction=last_test_prediction,
         last_test_target=last_test_target,
@@ -435,6 +456,7 @@ def train_transformer_forecaster(
     *,
     config: TransformerTrainingConfig | None = None,
     target_accuracy: float = 0.80,
+    min_skill: float = DEFAULT_MIN_SKILL_VS_PERSISTENCE,
     checkpoint_path: str | Path | None = None,
 ) -> PredictionModelResult:
     """Train and evaluate the Transformer forecaster."""
@@ -464,6 +486,8 @@ def train_transformer_forecaster(
     test_predictions = normalization.inverse_targets(test_predictions_scaled)
     validation_metrics = evaluate_prediction_metrics(split.y_val, val_predictions)
     test_metrics = evaluate_prediction_metrics(split.y_test, test_predictions)
+    validation_db_metrics = evaluate_db_metrics(split.y_val, val_predictions, split.X_val)
+    test_db_metrics = evaluate_db_metrics(split.y_test, test_predictions, split.X_test)
     last_test_prediction = float(test_predictions[-1])
     last_test_target = float(np.asarray(split.y_test, dtype=np.float32)[-1])
     test_target_min = float(np.min(split.y_test))
@@ -482,7 +506,10 @@ def train_transformer_forecaster(
         validation_metrics=validation_metrics,
         test_metrics=test_metrics,
         target_accuracy=target_accuracy,
-        meets_target=meets_prediction_target(test_metrics, target_accuracy=target_accuracy),
+        meets_target=meets_skill_gate(test_db_metrics, min_skill=min_skill),
+        validation_db_metrics=validation_db_metrics,
+        test_db_metrics=test_db_metrics,
+        min_skill=min_skill,
         checkpoint_path=saved_checkpoint,
         last_test_prediction=last_test_prediction,
         last_test_target=last_test_target,
@@ -497,16 +524,18 @@ def run_prediction_stage(
     lstm_config: LSTMTrainingConfig | None = None,
     transformer_config: TransformerTrainingConfig | None = None,
     target_accuracy: float = 0.80,
+    min_skill: float = DEFAULT_MIN_SKILL_VS_PERSISTENCE,
     run_transformer_if_eligible: bool = True,
     checkpoint_dir: str | Path | None = None,
 ) -> PredictionStageResult:
-    """Run LSTM first, then optional Transformer fallback when LSTM misses target."""
+    """Run LSTM first, then the Transformer fallback only if the LSTM misses the skill-vs-persistence gate."""
     output_dir = Path(checkpoint_dir) if checkpoint_dir is not None else None
     lstm_checkpoint = None if output_dir is None else output_dir / "lstm_best.pt"
     lstm_result = train_lstm_forecaster(
         split,
         config=lstm_config,
         target_accuracy=target_accuracy,
+        min_skill=min_skill,
         checkpoint_path=lstm_checkpoint,
     )
 
@@ -519,6 +548,7 @@ def run_prediction_stage(
             split,
             config=transformer_config,
             target_accuracy=target_accuracy,
+            min_skill=min_skill,
             checkpoint_path=transformer_checkpoint,
         )
 

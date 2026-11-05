@@ -26,7 +26,9 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--transformer-heads", type=int, default=4, help="Transformer attention heads.")
     parser.add_argument("--transformer-layers", type=int, default=2, help="Transformer encoder layers.")
     parser.add_argument("--transformer-epochs", type=int, default=140, help="Max Transformer epochs.")
-    parser.add_argument("--target-accuracy", type=float, default=0.80, help="Prototype gate threshold for within-10%-error accuracy.")
+    parser.add_argument("--target-accuracy", type=float, default=0.80, help="Legacy within-10%%-error threshold (informational only, not gated on).")
+    parser.add_argument("--min-skill", type=float, default=0.15,
+                        help="Gate: model MAE (dB) must be at least this fraction below persistence MAE.")
     parser.add_argument("--zf-required-db", type=float, default=15.0, help="Minimum ZF suppression gate for DRL.")
     parser.add_argument("--desired-angle-rad", type=float, default=0.0, help="Desired TN steering direction in radians.")
     parser.add_argument("--ntn-angle-rad", type=float, default=0.35, help="NTN direction in radians.")
@@ -47,6 +49,7 @@ def main() -> int:
 
     gates = Phase3Gates(
         lstm_target_accuracy=args.target_accuracy,
+        lstm_min_skill_vs_persistence=args.min_skill,
         zf_required_suppression_db=args.zf_required_db,
     )
     lstm_cfg = LSTMTrainingConfig(
@@ -80,7 +83,20 @@ def main() -> int:
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     summary_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    print(f"LSTM test within-10%-error accuracy: {payload['prediction']['lstm']['test_within_10pct_accuracy']:.4f}")
+    print(
+        "LSTM test within-10%-error accuracy (legacy, informational): "
+        f"{payload['prediction']['lstm']['test_within_10pct_accuracy']:.4f}"
+    )
+    db = payload["prediction"]["lstm"]["test_db_metrics"]
+    if db is not None:
+        print(
+            f"LSTM test MAE {db['mae_db']:.3f} dB | RMSE {db['rmse_db']:.3f} dB | "
+            f"within 1 dB {db['within_1db']:.3f} | within 3 dB {db['within_3db']:.3f}"
+        )
+        print(
+            f"Persistence MAE {db['persistence_mae_db']:.3f} dB | "
+            f"skill vs persistence {db['skill_vs_persistence']:.3f} (required >= {db['min_skill_required']:.2f})"
+        )
     print(f"LSTM gate passed: {payload['prediction']['lstm']['meets_target']}")
     print(f"Transformer fallback executed: {payload['prediction']['transformer_executed']}")
     print(f"ZF suppression (dB): {payload['mitigation']['suppression_db']:.4f}")
