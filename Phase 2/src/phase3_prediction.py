@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -148,6 +148,9 @@ class PredictionModelResult:
     min_skill: float = DEFAULT_MIN_SKILL_VS_PERSISTENCE
     meets_final_target: bool = False  # does NOT gate mitigation; only meets_target does
     min_final_skill: float = DEFAULT_MIN_FINAL_SKILL
+    history: dict[str, list[float]] | None = field(default=None, compare=False, repr=False)
+    val_predictions: np.ndarray | None = field(default=None, compare=False, repr=False)
+    test_predictions: np.ndarray | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         if not (0.0 <= self.min_skill < 1.0):
@@ -207,6 +210,28 @@ def _make_regression_loaders(split: Phase3DatasetSplit, batch_size: int, seed: i
     return train_loader, val_loader, test_loader
 
 
+def _make_train_val_loaders(
+    x_train: np.ndarray, y_train: np.ndarray, x_val: np.ndarray, y_val: np.ndarray, batch_size: int, seed: int
+) -> tuple[Any, Any]:
+    """Train (seeded shuffle) and validation loaders from plain arrays; no test data involved."""
+    torch, _ = _require_torch()
+    if batch_size <= 0:
+        raise ValueError("batch_size must be > 0.")
+
+    def _dataset(x: np.ndarray, y: np.ndarray) -> Any:
+        return torch.utils.data.TensorDataset(
+            torch.from_numpy(np.asarray(x, dtype=np.float32)),
+            torch.from_numpy(np.asarray(y, dtype=np.float32).reshape(-1, 1)),
+        )
+
+    generator = torch.Generator().manual_seed(seed)
+    train_loader = torch.utils.data.DataLoader(
+        _dataset(x_train, y_train), batch_size=batch_size, shuffle=True, generator=generator
+    )
+    val_loader = torch.utils.data.DataLoader(_dataset(x_val, y_val), batch_size=batch_size, shuffle=False)
+    return train_loader, val_loader
+
+
 @dataclass(frozen=True, slots=True)
 class NormalizationStats:
     """Train-split normalization parameters reused across split subsets."""
@@ -241,8 +266,12 @@ class NormalizationStats:
 
 
 def _fit_normalization(split: Phase3DatasetSplit) -> NormalizationStats:
-    x_train = np.asarray(split.X_train, dtype=np.float32)
-    y_train = np.asarray(split.y_train, dtype=np.float32)
+    return _fit_normalization_arrays(split.X_train, split.y_train)
+
+
+def _fit_normalization_arrays(x: np.ndarray, y: np.ndarray) -> NormalizationStats:
+    x_train = np.asarray(x, dtype=np.float32)
+    y_train = np.asarray(y, dtype=np.float32)
     x_mean = np.mean(x_train, axis=(0, 1), keepdims=True)
     x_std = np.std(x_train, axis=(0, 1), keepdims=True)
     x_std = np.where(x_std > 1e-8, x_std, 1.0)
@@ -279,12 +308,13 @@ def _fit_model(
     weight_decay: float,
     gradient_clip_norm: float,
     device: str,
-) -> tuple[Any, int, float]:
+) -> tuple[Any, int, float, dict[str, list[float]]]:
     torch, _ = _require_torch()
     criterion = torch.nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
     best_val_loss = float("inf")
+    history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}
     best_epoch = 0
     best_state: dict[str, Any] | None = None
     patience_counter = 0
@@ -292,6 +322,8 @@ def _fit_model(
     model.to(device)
     for epoch in range(1, max_epochs + 1):
         model.train()
+        train_loss_sum = 0.0
+        train_count = 0
         for batch_x, batch_y in train_loader:
             batch_x = batch_x.to(device)
             batch_y = batch_y.to(device)
@@ -301,6 +333,8 @@ def _fit_model(
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip_norm)
             optimizer.step()
+            train_loss_sum += float(loss.item()) * int(batch_x.shape[0])
+            train_count += int(batch_x.shape[0])
 
         model.eval()
         weighted_loss_sum = 0.0
@@ -318,6 +352,8 @@ def _fit_model(
         if sample_count <= 0:
             raise ValueError("Validation split is empty; cannot train model.")
         val_loss = weighted_loss_sum / sample_count
+        history["train_loss"].append(train_loss_sum / max(train_count, 1))
+        history["val_loss"].append(val_loss)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch
@@ -331,7 +367,7 @@ def _fit_model(
     if best_state is None or best_epoch <= 0:
         raise RuntimeError("Training did not produce a valid best checkpoint.")
     model.load_state_dict(best_state)
-    return model, best_epoch, float(best_val_loss)
+    return model, best_epoch, float(best_val_loss), history
 
 
 def _predict(model: Any, data: np.ndarray, *, batch_size: int, device: str) -> np.ndarray:
@@ -420,7 +456,7 @@ def train_lstm_forecaster(
 
     model = _build_lstm_model(cfg)
     train_loader, val_loader, _ = _make_regression_loaders(normalized_split, cfg.batch_size, seed=cfg.seed)
-    model, best_epoch, best_val_loss = _fit_model(
+    model, best_epoch, best_val_loss, history = _fit_model(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
@@ -469,6 +505,9 @@ def train_lstm_forecaster(
         min_skill=min_skill,
         meets_final_target=meets_final_target(test_db_metrics, min_final_skill=min_final_skill),
         min_final_skill=min_final_skill,
+        history=history,
+        val_predictions=val_predictions,
+        test_predictions=test_predictions,
         checkpoint_path=saved_checkpoint,
         last_test_prediction=last_test_prediction,
         last_test_target=last_test_target,
@@ -496,7 +535,7 @@ def train_transformer_forecaster(
 
     model = _build_transformer_model(cfg)
     train_loader, val_loader, _ = _make_regression_loaders(normalized_split, cfg.batch_size, seed=cfg.seed)
-    model, best_epoch, best_val_loss = _fit_model(
+    model, best_epoch, best_val_loss, history = _fit_model(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
@@ -545,6 +584,9 @@ def train_transformer_forecaster(
         min_skill=min_skill,
         meets_final_target=meets_final_target(test_db_metrics, min_final_skill=min_final_skill),
         min_final_skill=min_final_skill,
+        history=history,
+        val_predictions=val_predictions,
+        test_predictions=test_predictions,
         checkpoint_path=saved_checkpoint,
         last_test_prediction=last_test_prediction,
         last_test_target=last_test_target,

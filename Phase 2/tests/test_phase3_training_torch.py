@@ -154,3 +154,30 @@ def test_empty_validation_split_is_rejected() -> None:
     )
     with pytest.raises(ValueError, match="Validation split is empty"):
         train_lstm_forecaster(empty, config=_lstm_cfg())
+
+
+# --- Stage B: curves and predictions are kept on the result; search is validation-only ------------
+
+def test_result_keeps_training_curves_and_predictions() -> None:
+    split = _faded_split()
+    result = train_lstm_forecaster(split, config=_lstm_cfg(max_epochs=3))
+
+    assert set(result.history) == {"train_loss", "val_loss"}
+    assert len(result.history["train_loss"]) == len(result.history["val_loss"]) >= result.best_epoch >= 1
+    assert result.history["val_loss"][result.best_epoch - 1] == pytest.approx(result.best_validation_loss)
+    assert result.test_predictions.shape == (len(split.y_test),) and result.val_predictions.shape == (len(split.y_val),)
+    assert result.test_predictions[-1] == pytest.approx(result.last_test_prediction)
+
+
+def test_validation_search_trial_matches_the_final_training_run() -> None:
+    from src.phase3_search import run_trial
+
+    split = _faded_split()
+    cfg = _lstm_cfg(max_epochs=3)
+    trial = run_trial(split.X_train, split.y_train, split.X_val, split.y_val, cfg)
+    final = train_lstm_forecaster(split, config=cfg)
+
+    assert "test" not in " ".join(trial)  # no test-derived keys
+    assert trial["best_epoch"] == final.best_epoch
+    assert trial["best_val_loss_normalized_mse"] == final.best_validation_loss  # same seed -> identical training
+    assert trial["val_mae_db"] == pytest.approx(final.validation_db_metrics.mae_db)
