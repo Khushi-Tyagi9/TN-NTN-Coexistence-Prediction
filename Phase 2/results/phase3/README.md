@@ -60,8 +60,8 @@ Per-seed folders `final/seed_<s>/` hold the summary, checkpoint and test predict
 
 ## Reading these results (caveats)
 
-* The seeds change model initialisation and batch shuffling only; **each scenario has a single simulated dataset** (same data hash in every
-  run), so the std measures training variance, not data variance. The final-gate outcomes (urban fail, rural pass) rest on one data realisation each.
+* The seeds change model initialisation and batch shuffling only; **each scenario has a single simulated dataset** (all runs of a scenario share one
+  data hash, see Provenance), so the std measures training variance, not data variance. The final-gate outcomes (urban fail, rural pass) rest on one data realisation each.
 * The LSTM's margin over the best baseline is 4.3% (urban) and 5.3% (rural) in MAE: it is close to what a linear AR(10) filter achieves on this target.
 * The config was chosen on urban validation and applied to rural unchanged.
 * Only the local-mean target is part of Stage B. The instantaneous-target and sinr-ablation datasets exist but were not run here

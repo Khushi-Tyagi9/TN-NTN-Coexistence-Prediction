@@ -105,3 +105,9 @@ python run_phase3_colab.py --data-root data/phase3/urban --scenario urban
 
 See `docs/PHASE3_COLAB.md`. Results written to `results/` must come from saved result files; nothing
 in this README reports model performance.
+
+## Results and protocol
+
+* Stage B (final protocol; LSTM, local-mean target, 3 seeds per scenario, gates on the mean test MAE): `results/phase3/README.md`; protocol: `docs/STAGE_B_PROTOCOL.md`.
+* Exploratory validation-only runs: `results/phase3/preliminary/README.md`. Descriptive figures: `results/figures/`.
+
