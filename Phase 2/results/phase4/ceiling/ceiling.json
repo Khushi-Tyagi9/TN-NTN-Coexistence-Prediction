@@ -1,0 +1,321 @@
+{
+  "description": "Interference-free coverage ceiling: share of user-slots with SNR >= threshold, over the Stage B test runs.",
+  "snr_threshold_db": 15.0,
+  "definition": "SNR = satellite signal dBm - thermal noise dBm (no gNB interference); share over all user-slots of a run",
+  "scenarios": {
+    "urban": {
+      "scenario": "urban",
+      "n_test_runs": 10,
+      "n_user_series": 45,
+      "n_user_slots": 27000,
+      "runs": [
+        {
+          "run_id": "urban-u4-acir20-r0",
+          "user_count": 4,
+          "acir_db": 20.0,
+          "seed": 475401000,
+          "n_user_slots": 2400,
+          "share_snr_ge_threshold": 0.8116666666666666,
+          "min_snr_db": 12.861990623943385,
+          "mean_snr_db": 17.525603360794683,
+          "max_snr_db": 21.67472119766022
+        },
+        {
+          "run_id": "urban-u4-acir25-r5",
+          "user_count": 4,
+          "acir_db": 25.0,
+          "seed": 475401011,
+          "n_user_slots": 2400,
+          "share_snr_ge_threshold": 0.80875,
+          "min_snr_db": 13.032647992282449,
+          "mean_snr_db": 17.513082607425893,
+          "max_snr_db": 21.56644639771676
+        },
+        {
+          "run_id": "urban-u4-acir30-r1",
+          "user_count": 4,
+          "acir_db": 30.0,
+          "seed": 475401013,
+          "n_user_slots": 2400,
+          "share_snr_ge_threshold": 0.80875,
+          "min_snr_db": 12.864326350137944,
+          "mean_snr_db": 17.52651243290234,
+          "max_snr_db": 21.701869590173402
+        },
+        {
+          "run_id": "urban-u4-acir35-r1",
+          "user_count": 4,
+          "acir_db": 35.0,
+          "seed": 475401019,
+          "n_user_slots": 2400,
+          "share_snr_ge_threshold": 0.8041666666666667,
+          "min_snr_db": 12.796040537716976,
+          "mean_snr_db": 17.526945232898925,
+          "max_snr_db": 21.66844061811156
+        },
+        {
+          "run_id": "urban-u4-acir40-r1",
+          "user_count": 4,
+          "acir_db": 40.0,
+          "seed": 475401025,
+          "n_user_slots": 2400,
+          "share_snr_ge_threshold": 0.81375,
+          "min_snr_db": 12.805551982828362,
+          "mean_snr_db": 17.520200518610046,
+          "max_snr_db": 21.69391654490468
+        },
+        {
+          "run_id": "urban-u5-acir20-r2",
+          "user_count": 5,
+          "acir_db": 20.0,
+          "seed": 475401032,
+          "n_user_slots": 3000,
+          "share_snr_ge_threshold": 0.8063333333333333,
+          "min_snr_db": 12.857790803332108,
+          "mean_snr_db": 17.522783387057714,
+          "max_snr_db": 21.558973299307922
+        },
+        {
+          "run_id": "urban-u5-acir25-r4",
+          "user_count": 5,
+          "acir_db": 25.0,
+          "seed": 475401040,
+          "n_user_slots": 3000,
+          "share_snr_ge_threshold": 0.8143333333333334,
+          "min_snr_db": 12.92013672096202,
+          "mean_snr_db": 17.52403683609367,
+          "max_snr_db": 21.48102870844083
+        },
+        {
+          "run_id": "urban-u5-acir30-r5",
+          "user_count": 5,
+          "acir_db": 30.0,
+          "seed": 475401047,
+          "n_user_slots": 3000,
+          "share_snr_ge_threshold": 0.8076666666666666,
+          "min_snr_db": 13.0096017984811,
+          "mean_snr_db": 17.514797777579457,
+          "max_snr_db": 21.676188071048315
+        },
+        {
+          "run_id": "urban-u5-acir35-r0",
+          "user_count": 5,
+          "acir_db": 35.0,
+          "seed": 475401048,
+          "n_user_slots": 3000,
+          "share_snr_ge_threshold": 0.8103333333333333,
+          "min_snr_db": 12.720912470084457,
+          "mean_snr_db": 17.530458673922965,
+          "max_snr_db": 21.504237111718965
+        },
+        {
+          "run_id": "urban-u5-acir40-r0",
+          "user_count": 5,
+          "acir_db": 40.0,
+          "seed": 475401054,
+          "n_user_slots": 3000,
+          "share_snr_ge_threshold": 0.809,
+          "min_snr_db": 13.00075369051217,
+          "mean_snr_db": 17.527024170614194,
+          "max_snr_db": 21.507540245874978
+        }
+      ],
+      "over_runs": {
+        "mean": 0.809475,
+        "std": 0.003162533852841789,
+        "min": 0.8041666666666667,
+        "max": 0.8143333333333334,
+        "n": 10
+      },
+      "over_user_series": {
+        "mean": 0.8094814814814814,
+        "std": 0.0063147876615034714,
+        "min": 0.7966666666666666,
+        "max": 0.8233333333333334,
+        "n": 45
+      },
+      "pooled_share": 0.8094814814814815,
+      "analytic_nadir_line_share": 0.8083333333333333,
+      "hand_estimate_share": 0.808,
+      "difference_vs_hand_estimate_pp": 0.1481481481481417,
+      "analytic_minus_hand_estimate_pp": 0.03333333333332966,
+      "reproduces_saved_X_test": true,
+      "dataset": {
+        "directory": "data/phase3/urban",
+        "X_test_sha256": "c3bb1fd55cc007093556fe063d897d525d5bca27f1a2fa4d116df3b07b67f462",
+        "metadata_sha256": "edce5aa54d5895cf0487abab44f703077854e143282199e280f8cd6a3eb1aa6f",
+        "generated_at_git_sha": "0c972a06c1a9c36b89dfc05e231422100a5d8f07",
+        "window_counts": {
+          "train": 106200,
+          "val": 26550,
+          "test": 26550
+        }
+      }
+    },
+    "rural": {
+      "scenario": "rural",
+      "n_test_runs": 10,
+      "n_user_series": 45,
+      "n_user_slots": 27000,
+      "runs": [
+        {
+          "run_id": "rural-u4-acir20-r0",
+          "user_count": 4,
+          "acir_db": 20.0,
+          "seed": 627901000,
+          "n_user_slots": 2400,
+          "share_snr_ge_threshold": 0.81125,
+          "min_snr_db": 12.936550714392695,
+          "mean_snr_db": 17.516085017273028,
+          "max_snr_db": 21.59241323410751
+        },
+        {
+          "run_id": "rural-u4-acir25-r5",
+          "user_count": 4,
+          "acir_db": 25.0,
+          "seed": 627901011,
+          "n_user_slots": 2400,
+          "share_snr_ge_threshold": 0.8066666666666666,
+          "min_snr_db": 13.007800296061376,
+          "mean_snr_db": 17.518982876618185,
+          "max_snr_db": 21.52022236497116
+        },
+        {
+          "run_id": "rural-u4-acir30-r1",
+          "user_count": 4,
+          "acir_db": 30.0,
+          "seed": 627901013,
+          "n_user_slots": 2400,
+          "share_snr_ge_threshold": 0.8095833333333333,
+          "min_snr_db": 12.942700911080706,
+          "mean_snr_db": 17.523596269015556,
+          "max_snr_db": 21.59638241344574
+        },
+        {
+          "run_id": "rural-u4-acir35-r1",
+          "user_count": 4,
+          "acir_db": 35.0,
+          "seed": 627901019,
+          "n_user_slots": 2400,
+          "share_snr_ge_threshold": 0.8095833333333333,
+          "min_snr_db": 12.926306423644107,
+          "mean_snr_db": 17.52211180325836,
+          "max_snr_db": 21.491723448251264
+        },
+        {
+          "run_id": "rural-u4-acir40-r1",
+          "user_count": 4,
+          "acir_db": 40.0,
+          "seed": 627901025,
+          "n_user_slots": 2400,
+          "share_snr_ge_threshold": 0.8091666666666667,
+          "min_snr_db": 12.931771719975629,
+          "mean_snr_db": 17.516646422413537,
+          "max_snr_db": 21.58849724720922
+        },
+        {
+          "run_id": "rural-u5-acir20-r2",
+          "user_count": 5,
+          "acir_db": 20.0,
+          "seed": 627901032,
+          "n_user_slots": 3000,
+          "share_snr_ge_threshold": 0.8076666666666666,
+          "min_snr_db": 12.79020032813655,
+          "mean_snr_db": 17.521552725974704,
+          "max_snr_db": 21.492284819179886
+        },
+        {
+          "run_id": "rural-u5-acir25-r4",
+          "user_count": 5,
+          "acir_db": 25.0,
+          "seed": 627901040,
+          "n_user_slots": 3000,
+          "share_snr_ge_threshold": 0.8083333333333333,
+          "min_snr_db": 13.02210377327738,
+          "mean_snr_db": 17.525904462379,
+          "max_snr_db": 21.50025712411849
+        },
+        {
+          "run_id": "rural-u5-acir30-r5",
+          "user_count": 5,
+          "acir_db": 30.0,
+          "seed": 627901047,
+          "n_user_slots": 3000,
+          "share_snr_ge_threshold": 0.8093333333333333,
+          "min_snr_db": 13.027187108672535,
+          "mean_snr_db": 17.528868184855067,
+          "max_snr_db": 21.531373640687406
+        },
+        {
+          "run_id": "rural-u5-acir35-r0",
+          "user_count": 5,
+          "acir_db": 35.0,
+          "seed": 627901048,
+          "n_user_slots": 3000,
+          "share_snr_ge_threshold": 0.8096666666666666,
+          "min_snr_db": 12.908868249128574,
+          "mean_snr_db": 17.52596168447686,
+          "max_snr_db": 21.54619445453092
+        },
+        {
+          "run_id": "rural-u5-acir40-r0",
+          "user_count": 5,
+          "acir_db": 40.0,
+          "seed": 627901054,
+          "n_user_slots": 3000,
+          "share_snr_ge_threshold": 0.8116666666666666,
+          "min_snr_db": 12.762430986345095,
+          "mean_snr_db": 17.512712301387324,
+          "max_snr_db": 21.374636050341806
+        }
+      ],
+      "over_runs": {
+        "mean": 0.8092916666666667,
+        "std": 0.0015001285953107994,
+        "min": 0.8066666666666666,
+        "max": 0.8116666666666666,
+        "n": 10
+      },
+      "over_user_series": {
+        "mean": 0.8092962962962964,
+        "std": 0.005690778568728007,
+        "min": 0.795,
+        "max": 0.8216666666666667,
+        "n": 45
+      },
+      "pooled_share": 0.8092962962962963,
+      "analytic_nadir_line_share": 0.8083333333333333,
+      "hand_estimate_share": 0.808,
+      "difference_vs_hand_estimate_pp": 0.129629629629624,
+      "analytic_minus_hand_estimate_pp": 0.03333333333332966,
+      "reproduces_saved_X_test": true,
+      "dataset": {
+        "directory": "data/phase3/rural",
+        "X_test_sha256": "e7a8c3858a3442e59b7e9202c3215c70d2b158021de5e719f7c5a0f1e9a70df4",
+        "metadata_sha256": "aa5a685ca53abfe496952684512ed21ac0a74389e6768908aa3b72100054682b",
+        "generated_at_git_sha": "0c972a06c1a9c36b89dfc05e231422100a5d8f07",
+        "window_counts": {
+          "train": 106200,
+          "val": 26550,
+          "test": 26550
+        }
+      }
+    }
+  },
+  "noise_power_dbm": -93.98970004336019,
+  "run_info": {
+    "seed": 0,
+    "python": "3.13.3",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "numpy": "2.5.4",
+    "torch": "2.15.0+cpu",
+    "cuda_available": false,
+    "generated_utc": "2026-11-05T07:26:55+00:00",
+    "git_sha": "fb6f5cc51c4c79e3968177a059a2f269249fd6ec",
+    "git_dirty": false,
+    "git_dirty_files": [],
+    "scipy": "1.18.1",
+    "argv": [],
+    "note": "no randomness of its own; seeds come from the dataset metadata"
+  }
+}
