@@ -290,7 +290,9 @@ def test_eta_over_the_limit_pauses_after_the_first_trial_and_resumes_identically
     urban = _common(tiny_data_root, results, "urban")
     search_dir = results / "urban" / "search"
 
-    assert run_stage_b.main(["search", "--eta-limit-hours", "0", *urban]) == 3  # any ETA exceeds a 0 h limit
+    # A negative limit: ANY ETA exceeds it, even 0.0 s. The driver rounds a trial's time to 0.1 s, so a very fast
+    # warm trial (< 0.05 s) gives ETA = 0 and would not exceed a limit of 0 h (timing-dependent, hence -1).
+    assert run_stage_b.main(["search", "--eta-limit-hours", "-1", *urban]) == 3
     out = capsys.readouterr().out
     assert "[eta] first trial took" in out and "wall-clock" in out and "ETA" in out
     assert (search_dir / "ETA_EXCEEDED.txt").exists() and not (search_dir / "trials.json").exists()
