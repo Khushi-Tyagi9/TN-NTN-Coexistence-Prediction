@@ -1,0 +1,130 @@
+{
+  "status": "PRELIMINARY / exploratory - NOT the final protocol; no gate is evaluated",
+  "split_evaluated": "validation only; the test split was not read",
+  "caveat": "validation is also used for early stopping and best-epoch selection, so these numbers are mildly optimistic",
+  "scenario": "urban",
+  "variant": "instantaneous",
+  "config": {
+    "hidden_size": 96,
+    "num_layers": 1,
+    "dropout": 0.0,
+    "learning_rate": 0.001,
+    "batch_size": 64,
+    "max_epochs": 40,
+    "early_stopping_patience": 6,
+    "weight_decay": 0.0,
+    "gradient_clip_norm": 1.0,
+    "device": "cpu",
+    "seed": 42
+  },
+  "best_epoch": 3,
+  "epochs_run": 9,
+  "seconds_per_epoch": [
+    22.207295500003966,
+    18.122913800005335,
+    34.46374859998468,
+    36.32597450001049,
+    35.79898099999991,
+    36.60034599999199,
+    35.217949000012595,
+    23.42023899999913,
+    15.639006499986863
+  ],
+  "wall_clock_seconds": 258.81538829999045,
+  "validation": {
+    "mae_db": 5.284951822385052,
+    "rmse_db": 6.779099218732758,
+    "within_1db": 0.12192090395480226,
+    "within_3db": 0.35725047080979283,
+    "baselines_mae_db": {
+      "persistence": 6.3497987579805475,
+      "moving_average_10": 6.208776670383697,
+      "linear_ar_10": 5.374708624932446
+    },
+    "best_baseline": "linear_ar_10",
+    "skill_vs_persistence": 0.16769774542180182,
+    "skill_vs_best_baseline": 0.01669984529598989
+  },
+  "history": {
+    "train_loss": [
+      0.29399329326022594,
+      0.2816380753333061,
+      0.2806955069988236,
+      0.2801628666689616,
+      0.2800137422336248,
+      0.2797032100197959,
+      0.27975255499227347,
+      0.27961272275829496,
+      0.279361379088206
+    ],
+    "val_loss": [
+      0.28485328765463247,
+      0.2812662117113052,
+      0.27844128149826425,
+      0.2810076942832232,
+      0.27974391427978507,
+      0.2797924522300674,
+      0.27993051163782057,
+      0.27846002068111003,
+      0.2801104042983549
+    ]
+  },
+  "dataset": {
+    "directory": "data/phase3/urban_instantaneous",
+    "scenario": "urban",
+    "target_kind": "instantaneous",
+    "target": "interference_dbm",
+    "masked_features": [],
+    "window_counts": {
+      "train": 106200,
+      "val": 26550
+    },
+    "fast_fading_rho": 0.10238970661517889,
+    "slot_duration_s": 0.5,
+    "provenance": {
+      "seed": 1000,
+      "python": "3.13.3",
+      "platform": "Windows-11-10.0.26300-SP0",
+      "numpy": "2.5.4",
+      "torch": "2.15.0+cpu",
+      "cuda_available": false,
+      "generated_utc": "2026-11-05T05:05:09+00:00",
+      "git_sha": "0c972a06c1a9c36b89dfc05e231422100a5d8f07",
+      "git_dirty": false,
+      "scipy": "1.18.1"
+    },
+    "sha256": {
+      "X_train.npy": "5e12ce4ed81dbdee063d0281182bed29f8cf1acb80ced5237d2ee18b6c9b637e",
+      "y_train.npy": "d3cf2d94204bbaf212a23d63b03cd10dff5f4f51ee293697e0190144ae35f31d",
+      "X_val.npy": "a79687f6f847726c45a051904750875d8b7380cd6bd34ef934d05faee83914fb",
+      "y_val.npy": "bfa138c66fd6c4e02a04b8ae479f13cfcb41b7b0753542334ac2e568f0b252c9"
+    }
+  },
+  "run_info": {
+    "seed": 42,
+    "python": "3.13.3",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "numpy": "2.5.4",
+    "torch": "2.15.0+cpu",
+    "cuda_available": false,
+    "generated_utc": "2026-11-05T05:53:52+00:00",
+    "git_sha": "1911e83504b7bfc057944025a5fedaef65bc360f",
+    "git_dirty": true,
+    "git_dirty_files": [
+      "\"Phase 2/run_stage_b.py\"",
+      "\"Phase 2/src/phase3_search.py\"",
+      "\"Phase 2/tests/test_stage_b.py\"",
+      "Phase 2/results/figures/baseline_errors.json\""
+    ],
+    "scipy": "1.18.1",
+    "argv": [
+      "--scenario",
+      "urban",
+      "--variant",
+      "instantaneous",
+      "--threads",
+      "8"
+    ],
+    "torch_threads": 8
+  }
+}

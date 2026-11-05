@@ -32,9 +32,14 @@
     "numpy": "2.5.2",
     "torch": null,
     "cuda_available": false,
-    "generated_utc": "2026-11-05T05:28:56+00:00",
-    "git_sha": "ced4544da0d93c3e156ce0753b247bf5709af8aa",
+    "generated_utc": "2026-11-05T05:52:37+00:00",
+    "git_sha": "1911e83504b7bfc057944025a5fedaef65bc360f",
     "git_dirty": true,
+    "git_dirty_files": [
+      "\"Phase 2/src/phase3_search.py\"",
+      "\"Phase 2/tests/test_stage_b.py\"",
+      "Phase 2/run_stage_b.py\""
+    ],
     "scipy": "1.18.1",
     "data_root": "data\\phase3"
   }

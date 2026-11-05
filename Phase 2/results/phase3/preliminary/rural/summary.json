@@ -1,0 +1,126 @@
+{
+  "status": "PRELIMINARY / exploratory - NOT the final protocol; no gate is evaluated",
+  "split_evaluated": "validation only; the test split was not read",
+  "caveat": "validation is also used for early stopping and best-epoch selection, so these numbers are mildly optimistic",
+  "scenario": "rural",
+  "variant": null,
+  "config": {
+    "hidden_size": 96,
+    "num_layers": 1,
+    "dropout": 0.0,
+    "learning_rate": 0.001,
+    "batch_size": 64,
+    "max_epochs": 40,
+    "early_stopping_patience": 6,
+    "weight_decay": 0.0,
+    "gradient_clip_norm": 1.0,
+    "device": "cpu",
+    "seed": 42
+  },
+  "best_epoch": 2,
+  "epochs_run": 8,
+  "seconds_per_epoch": [
+    22.401903799996944,
+    43.74103060000925,
+    36.18885299999965,
+    18.083665999991354,
+    17.16639210001449,
+    16.822336599987466,
+    16.416754200006835,
+    17.51912730000913
+  ],
+  "wall_clock_seconds": 189.19795259999228,
+  "validation": {
+    "mae_db": 2.324588669599113,
+    "rmse_db": 2.921273783355188,
+    "within_1db": 0.26949152542372884,
+    "within_3db": 0.7,
+    "baselines_mae_db": {
+      "persistence": 4.607382844109544,
+      "moving_average_10": 2.654383628629104,
+      "linear_ar_10": 2.471879437206179
+    },
+    "best_baseline": "linear_ar_10",
+    "skill_vs_persistence": 0.495464399584016,
+    "skill_vs_best_baseline": 0.05958654997087576
+  },
+  "history": {
+    "train_loss": [
+      0.10867265629650509,
+      0.09402530646537433,
+      0.09355720988437954,
+      0.0930400968967409,
+      0.09299731943510796,
+      0.09282048279226612,
+      0.09281273294976876,
+      0.0926201269030571
+    ],
+    "val_loss": [
+      0.09565455014422788,
+      0.09287929093994887,
+      0.0932443489642242,
+      0.09343413928134293,
+      0.09393085243338245,
+      0.09376025558977252,
+      0.09300915498293501,
+      0.09402877736338563
+    ]
+  },
+  "dataset": {
+    "directory": "data/phase3/rural",
+    "scenario": "rural",
+    "target_kind": "local_mean",
+    "target": "interference_local_dbm",
+    "masked_features": [],
+    "window_counts": {
+      "train": 106200,
+      "val": 26550
+    },
+    "fast_fading_rho": 0.10238970661517889,
+    "slot_duration_s": 0.5,
+    "provenance": {
+      "seed": 1000,
+      "python": "3.13.3",
+      "platform": "Windows-11-10.0.26300-SP0",
+      "numpy": "2.5.4",
+      "torch": "2.15.0+cpu",
+      "cuda_available": false,
+      "generated_utc": "2026-11-05T05:05:10+00:00",
+      "git_sha": "0c972a06c1a9c36b89dfc05e231422100a5d8f07",
+      "git_dirty": false,
+      "scipy": "1.18.1"
+    },
+    "sha256": {
+      "X_train.npy": "59e82637f14f5ebbb261f5784d040468c1fc50dacf0091b092fd8e56eb2f954e",
+      "y_train.npy": "aede6a3169179912235adc9dfa5a2a6f644373912e63d916a41369ed05a15366",
+      "X_val.npy": "bea0095d3b6657ac26299bcc86f257911264594d603efa9c4146f512dfda4d2e",
+      "y_val.npy": "0b7416ae99dcc3ed25eaa3ef827c85d724c80fc32dd5913918cd6cb6f5b2f55c"
+    }
+  },
+  "run_info": {
+    "seed": 42,
+    "python": "3.13.3",
+    "platform": "Windows-11-10.0.26300-SP0",
+    "numpy": "2.5.4",
+    "torch": "2.15.0+cpu",
+    "cuda_available": false,
+    "generated_utc": "2026-11-05T05:47:36+00:00",
+    "git_sha": "1911e83504b7bfc057944025a5fedaef65bc360f",
+    "git_dirty": true,
+    "git_dirty_files": [
+      "\"Phase 2/src/phase3_search.py\"",
+      "\"Phase 2/tests/test_stage_b.py\"",
+      "Phase 2/run_stage_b.py\""
+    ],
+    "scipy": "1.18.1",
+    "argv": [
+      "--scenario",
+      "rural",
+      "--threads",
+      "12",
+      "--eta-limit-minutes",
+      "30"
+    ],
+    "torch_threads": 12
+  }
+}
