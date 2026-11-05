@@ -89,6 +89,11 @@ def main(argv: list[str] | None = None) -> int:
     x_train, y_train, x_val, y_val = load_train_val_arrays(data_dir)
     config = PRELIMINARY_CONFIG
 
+    # Provenance is snapshotted BEFORE training so commits made while it runs cannot change what is recorded.
+    run_info = collect_run_info(
+        PRELIMINARY_CONFIG.seed,
+        extra={"argv": argv if argv is not None else sys.argv[1:], "torch_threads": args.threads},
+    )
     epoch_seconds: list[float] = []
     clock = {"last": time.perf_counter()}
 
@@ -139,8 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         },
         "history": result["history"],
         "dataset": info,
-        "run_info": collect_run_info(config.seed, extra={"argv": argv if argv is not None else sys.argv[1:],
-                                                         "torch_threads": args.threads}),
+        "run_info": run_info,
     }
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")

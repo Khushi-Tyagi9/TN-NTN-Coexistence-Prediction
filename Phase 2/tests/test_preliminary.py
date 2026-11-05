@@ -82,3 +82,17 @@ def test_parser_defaults() -> None:
     assert (args.threads, args.eta_limit_minutes, args.variant) == (12, 20.0, "instantaneous")
     with pytest.raises(SystemExit):
         run_preliminary.build_parser().parse_args(["--scenario", "urban", "--variant", "nosinr"])
+
+
+def test_run_info_is_snapshotted_before_training(tiny_root, tmp_path, monkeypatch) -> None:
+    from src.phase3_prediction import LSTMTrainingConfig
+
+    events: list[str] = []
+    real_collect, real_train = run_preliminary.collect_run_info, run_preliminary.train_validation_only
+    monkeypatch.setattr(run_preliminary, "PRELIMINARY_CONFIG", LSTMTrainingConfig(max_epochs=1, device="cpu", seed=42))
+    monkeypatch.setattr(run_preliminary, "collect_run_info", lambda *a, **k: (events.append("run_info"), real_collect(*a, **k))[1])
+    monkeypatch.setattr(run_preliminary, "train_validation_only", lambda *a, **k: (events.append("train"), real_train(*a, **k))[1])
+
+    run_preliminary.main(["--scenario", "urban", "--data-root", str(tiny_root), "--out", str(tmp_path / "o"), "--threads", "2"])
+
+    assert events == ["run_info", "train"]
