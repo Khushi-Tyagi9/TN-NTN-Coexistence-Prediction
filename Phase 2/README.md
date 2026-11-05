@@ -9,10 +9,19 @@ See `AUDIT.md` for the review that shaped the current Phase 3 design and the lis
 Python >= 3.10 (the code uses `slots=True` dataclasses and runtime `X | Y` unions).
 
 ```bash
-pip install -r requirements.txt            # simulator, tests
-pip install -r requirements_phase3_colab.txt   # + torch, gymnasium, stable-baselines3 (training)
+pip install -r requirements.txt        # simulator, training (torch, gymnasium, SB3), tests; lower-bound ranges
+pip install -r requirements-lock.txt   # OR: the exact versions the suite was verified against
+pip install -r requirements-dev.txt    # optional: black, flake8, isort, jupyter
 python -m pytest
 ```
+
+Without PyTorch/gymnasium/stable-baselines3 the suite still passes but the training and DRL tests are
+**skipped** (reasons are printed, `-rs`): a green run with skips means the training code did not run.
+The verified configuration is 142 passed, 0 skipped. `requirements_phase3_colab.txt` just includes
+`requirements.txt`.
+
+Training runs record `run_info` (seed, library versions, git SHA/dirty flag, command line) in the
+summary JSON; `--seed` seeds the split, model initialisation, batch shuffling and PPO.
 
 ## Channel model (time-series simulator, `src/timeseries.py`)
 

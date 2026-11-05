@@ -1,0 +1,8 @@
+# Optional developer tooling
+-r requirements.txt
+black>=21.0
+flake8>=3.9.0
+isort>=5.9.0
+jupyter>=1.0.0
+notebook>=6.4.0
+ipython>=7.0.0
