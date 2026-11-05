@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
@@ -308,6 +308,7 @@ def _fit_model(
     weight_decay: float,
     gradient_clip_norm: float,
     device: str,
+    epoch_callback: Callable[[int, float, float], None] | None = None,
 ) -> tuple[Any, int, float, dict[str, list[float]]]:
     torch, _ = _require_torch()
     criterion = torch.nn.MSELoss()
@@ -354,6 +355,8 @@ def _fit_model(
         val_loss = weighted_loss_sum / sample_count
         history["train_loss"].append(train_loss_sum / max(train_count, 1))
         history["val_loss"].append(val_loss)
+        if epoch_callback is not None:  # (epoch, train loss, val loss); may raise to stop training
+            epoch_callback(epoch, history["train_loss"][-1], val_loss)
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = epoch

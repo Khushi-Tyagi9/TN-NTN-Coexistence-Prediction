@@ -72,7 +72,12 @@ def git_state() -> dict[str, Any]:
     """Current commit SHA and whether tracked files have uncommitted changes (None if not a git repo)."""
     sha = _git("rev-parse", "HEAD")
     status = _git("status", "--porcelain", "--untracked-files=no")
-    return {"git_sha": sha or None, "git_dirty": None if status is None else bool(status)}
+    dirty_files = None if status is None else sorted(line[3:].strip() for line in status.splitlines() if line.strip())
+    return {
+        "git_sha": sha or None,
+        "git_dirty": None if status is None else bool(status),
+        "git_dirty_files": dirty_files,  # tracked files that differ from the commit (so a dirty flag is explainable)
+    }
 
 
 def collect_run_info(seed: int, extra: dict[str, Any] | None = None) -> dict[str, Any]:

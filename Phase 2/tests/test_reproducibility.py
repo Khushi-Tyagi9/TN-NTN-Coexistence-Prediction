@@ -53,7 +53,9 @@ def test_collect_run_info_is_json_safe_and_records_seed_and_versions() -> None:
 
 def test_git_state_reports_sha_in_this_repo() -> None:
     state = git_state()
-    assert set(state) == {"git_sha", "git_dirty"}
+    assert set(state) == {"git_sha", "git_dirty", "git_dirty_files"}
+    if state["git_dirty_files"] is not None:
+        assert state["git_dirty"] == bool(state["git_dirty_files"])
     if state["git_sha"] is not None:  # None only when git is unavailable
         assert len(state["git_sha"]) == 40
 
